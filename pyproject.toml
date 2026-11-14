@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rlpi"
+version = "0.1.0"
+description = "RLPI v2 — Rocket League Player Index"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.2",
+    "requests>=2.32",
+    "python-ballchasing>=0.5.4",
+    "polars>=2.0",
+    "pyarrow>=20",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+# Installés aux phases suivantes
+parse = []          # choix du parseur en phase 2
+model = ["scikit-learn>=1.9", "lightgbm>=4.7"]
+app = ["streamlit>=1.60"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

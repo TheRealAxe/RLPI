@@ -1,0 +1,36 @@
+# Critères du RLPI (version 2020) et source de chaque note en v2.
+# source : auto   = calculé directement depuis les données du replay
+#          modele = score d'adéquation issu du modèle de valeur
+#          mixte  = combinaison d'une mesure auto et d'une note manuelle
+#          manuel = noté par Théo
+# A confirmer avec Théo : sens de High / Low (catégorie Speed).
+
+categories:
+  Mecaniques:
+    Basics:       {source: mixte,  pistes: "touches, ratio tirs/touches, pertes de balle"}
+    "50's":       {source: auto,   pistes: "challenges simultanés, équipe qui récupère la balle ensuite"}
+    Precision:    {source: auto,   pistes: "buts/tirs, xG, point d'impact dans le but, barres"}
+    Car Control:  {source: mixte,  pistes: "récupérations, temps au sol/mur/air, atterrissages"}
+  Mooving:
+    Reflex:       {source: mixte,  pistes: "temps de réaction après une touche adverse"}
+    Rotation dyn: {source: modele, pistes: "adéquation des positionnements hors balle"}
+    Agressivite:  {source: auto,   pistes: "démos, bumps, touches et temps en moitié adverse, vol de boost"}
+  Vision:
+    Lecture:      {source: modele, pistes: "anticipation : position avant la touche adverse"}
+    Preshot:      {source: mixte,  pistes: "placement avant les tirs et passes, qualité des centres"}
+    Decision:     {source: modele, pistes: "score d'adéquation moyen sur les moments de décision"}
+  Clutch:
+    Meca avancee: {source: mixte,  pistes: "aériens, flicks, resets (détection par le parseur)"}
+    Mindgame:     {source: manuel}
+  Cervo:
+    Calls:          {source: manuel}
+    Mental:         {source: mixte,  pistes: "évolution de la performance après un but encaissé"}
+    Cap adaptation: {source: manuel}
+  Speed:
+    High:         {source: auto,   pistes: "à préciser avec Théo"}
+    Low:          {source: auto,   pistes: "à préciser avec Théo"}
+    Boost mana:   {source: auto,   pistes: "boost moyen, temps à 0, petits pads vs grosses pastilles, vol de boost"}
+
+agregation:
+  categorie: moyenne des sous-critères renseignés (un critère non noté est exclu, pas compté à 0)
+  global: moyenne des catégories renseignées

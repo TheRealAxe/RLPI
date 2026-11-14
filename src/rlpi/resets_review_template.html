@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vérification des resets</title>
+<style>
+:root {
+  --bg: #f6f7f9; --surface-1: #ffffff; --line: #d5d9e0; --grid: #e8ebef;
+  --text-primary: #16191d; --text-secondary: #4a525c; --text-muted: #6b7380;
+  --t0: #2a78d6; --t1: #d95926; --ball: #16191d; --accent: #8a5cf6;
+  --good: #1a7f37; --bad: #c4382f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111317; --surface-1: #1a1d22; --line: #3a404a; --grid: #262a31;
+    --text-primary: #eef0f3; --text-secondary: #b7bec8; --text-muted: #8c95a1;
+    --t0: #3987e5; --t1: #eb6834; --ball: #eef0f3; --accent: #a585ff;
+    --good: #4cb86a; --bad: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111317; --surface-1: #1a1d22; --line: #3a404a; --grid: #262a31;
+  --text-primary: #eef0f3; --text-secondary: #b7bec8; --text-muted: #8c95a1;
+  --t0: #3987e5; --t1: #eb6834; --ball: #eef0f3; --accent: #a585ff;
+  --good: #4cb86a; --bad: #e66767;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text-primary);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.sub { color: var(--text-secondary); margin: 0 0 16px; }
+.card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-top: 12px; }
+.explain { color: var(--text-secondary); }
+.clip-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+.clip-head h2 { font-size: 16px; margin: 0; }
+.meta { color: var(--text-muted); font-size: 13px; }
+.views { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 12px; margin-top: 10px; }
+@media (max-width: 720px) { .views { grid-template-columns: 1fr; } }
+.views figure { margin: 0; }
+.views figcaption { font-size: 12px; color: var(--text-muted); }
+svg { width: 100%; height: auto; display: block; }
+.ctrl { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.ctrl input[type=range] { flex: 1; min-width: 160px; }
+button { font: inherit; border: 1px solid var(--line); background: var(--surface-1); color: var(--text-primary);
+  border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface-1); border-color: var(--text-primary); }
+.tlabel { font-variant-numeric: tabular-nums; color: var(--text-secondary); min-width: 70px; }
+.q { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 10px; }
+.q span.lbl { min-width: 230px; color: var(--text-secondary); }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tag { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 12px; color: var(--text-secondary); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--text-secondary); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+textarea { width: 100%; font: 12px/1.4 ui-monospace, monospace; background: var(--bg); color: var(--text-primary);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.progress { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 8px 0; border-bottom: 1px solid var(--line);
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+input[type=text] { font: inherit; flex: 1; min-width: 200px; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px;
+  background: var(--surface-1); color: var(--text-primary); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Vérification des resets détectés</h1>
+  <p class="sub" id="intro"></p>
+  <div class="card explain">
+    Pour chaque cas, regarde l'animation (2 s avant le reset, 3 s après). Le joueur entouré en violet est celui qui
+    prend le reset ; l'instant du reset est marqué d'un trait violet sur la barre de temps.
+    <b>Vue du dessus</b> : terrain entier, son but adverse en haut. <b>Vue de côté</b> : longueur du terrain × hauteur
+    (sol en bas, plafond en haut), pour juger si le contact se fait bien en l'air.
+    <br>Réponds à deux questions : <b>est-ce un vrai flip reset</b> (les quatre roues sur la balle, en l'air) et
+    <b>le classement de la défense est-il juste</b> (« bas » = au but ou près de sa ligne, au sol ; « challenge » = monte
+    ou va à la balle). Tes réponses sont gardées dans ce navigateur ; en bas, copie le texte et colle-le-moi.
+    <div class="legend" style="margin-top:8px">
+      <span><i style="background:var(--t0)"></i>équipe bleue</span>
+      <span><i style="background:var(--t1)"></i>équipe orange</span>
+      <span><i style="background:var(--ball)"></i>balle</span>
+      <span><i style="background:none;border:2px solid var(--accent)"></i>joueur qui prend le reset</span>
+    </div>
+  </div>
+  <div class="progress"><b id="done"></b><span class="meta">réponses enregistrées dans ce navigateur</span></div>
+  <div id="clips"></div>
+  <div class="card">
+    <h2 style="font-size:16px;margin:0 0 6px">Tes réponses</h2>
+    <p class="meta" style="margin:0 0 8px">Copie ce texte et colle-le dans la conversation.</p>
+    <textarea id="out" rows="8" readonly></textarea>
+    <div class="ctrl"><button id="copy">Copier</button><span class="meta" id="copied"></span></div>
+  </div>
+</main>
+<script>
+const DATA = /*__DATA__*/null;
+if (!DATA) { document.querySelector("main").innerHTML = "<p>Page vide : ouvre le fichier généré dans reports/.</p>"; throw 0; }
+const $ = s => document.querySelector(s);
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+const KEY = "rlpi-resets-" + DATA.batch;
+let answers = {};
+try { answers = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { answers = {}; }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(answers)); } catch (e) {} render_out(); }
+function render_out() {
+  const n = DATA.clips.filter(c => answers[c.id]?.reset && answers[c.id]?.defense).length;
+  $("#done").textContent = `${n} / ${DATA.clips.length} cas jugés`;
+  $("#out").value = JSON.stringify({ lot: DATA.batch, reponses: DATA.clips.map(c => ({ id: c.id, ...(answers[c.id] || {}) })) });
+}
+$("#intro").textContent = `${DATA.clips.length} resets tirés au hasard parmi les ${DATA.n_total} détectés sur ${DATA.n_matches} matchs RLCS. Durée : 15 à 20 minutes.`;
+$("#copy").addEventListener("click", () => { $("#out").select(); navigator.clipboard?.writeText($("#out").value); $("#copied").textContent = "copié"; });
+
+const OUT_FR = { used: "reset utilisé (flip)", landed: "reset non utilisé (atterrit)", expired: "reset perdu (expiré)", superseded: "remplacé par un autre reset" };
+const DEF_FR = { challenge: "challenge", bas: "bas", ailleurs: "ailleurs" };
+
+DATA.clips.forEach((c, idx) => {
+  const r = c.row, att = r.team; // équipe qui prend le reset
+  const flip = att === 0 ? 1 : -1; // vue : l'équipe du reset attaque vers le haut
+  const card = document.createElement("div"); card.className = "card";
+  const shooter = c.players.find(p => p.name === r.player_name);
+  const defs = c.defenders.map(d => `${c.players.find(p => p.slot === d.slot).name} : <b>${DEF_FR[d.role]}</b>`).join(" · ");
+  card.innerHTML = `<div class="clip-head"><h2>Cas ${idx + 1} — ${r.player_name}</h2>
+      <span class="meta">${r.date.slice(0, 10).split("-").reverse().join("/")} · ${c.players.filter(p => p.team === 0).map(p => p.name).join(", ")} vs ${c.players.filter(p => p.team === 1).map(p => p.name).join(", ")}</span></div>
+    <div class="tags"><span class="tag">détecté : ${OUT_FR[r.outcome] || r.outcome}${r.time_to_use != null ? ` après ${r.time_to_use.toFixed(1)} s` : ""}</span>
+      <span class="tag">hauteur voiture ${Math.round(r.player_z)} · balle ${Math.round(r.ball_z)} uu</span>
+      <span class="tag">défense classée : ${r.defense}</span>
+      <span class="tag">${r.goal_5s ? "but dans les 5 s" : "pas de but dans les 5 s"}</span></div>
+    <div class="views"><figure><svg class="top" viewBox="0 0 220 275" role="img" aria-label="Vue du dessus"></svg><figcaption>Vue du dessus (attaque de ${r.player_name} vers le haut)</figcaption></figure>
+      <figure><svg class="side" viewBox="0 0 400 110" role="img" aria-label="Vue de côté"></svg><figcaption>Vue de côté : longueur du terrain (but adverse à droite) × hauteur</figcaption>
+      <p class="meta" style="margin:8px 0 0">Défenseurs au moment du reset : ${defs}</p></figure></div>
+    <div class="ctrl"><button class="play">▶ Lecture</button><button class="slow" aria-pressed="false">Ralenti ×0,3</button>
+      <input type="range" min="0" max="${c.ball.length - 1}" value="${c.ir}" aria-label="Temps"><span class="tlabel"></span></div>
+    <div class="q"><span class="lbl">Vrai flip reset ?</span>${["oui", "non", "douteux"].map(v => `<button data-q="reset" data-v="${v}">${v}</button>`).join("")}</div>
+    <div class="q"><span class="lbl">Défense bien classée ?</span>${["oui", "non", "douteux"].map(v => `<button data-q="defense" data-v="${v}">${v}</button>`).join("")}</div>
+    <div class="q"><span class="lbl">Commentaire (facultatif)</span><input type="text" placeholder="ex. il touche la balle avec le nez, pas les roues"></div>`;
+  $("#clips").appendChild(card);
+
+  // --- vues
+  const top = card.querySelector(".top"), side = card.querySelector(".side");
+  const TX = x => 110 + (x * flip) / 4096 * 100, TY = y => 137.5 - (y * flip) / 5120 * 127.5;
+  el("rect", { x: 10, y: 10, width: 200, height: 255, rx: 14, fill: "none", stroke: "var(--line)", "stroke-width": 1.5 }, top);
+  el("line", { x1: 10, x2: 210, y1: 137.5, y2: 137.5, stroke: "var(--grid)" }, top);
+  el("circle", { cx: 110, cy: 137.5, r: 22, fill: "none", stroke: "var(--grid)" }, top);
+  el("rect", { x: 88, y: 5, width: 44, height: 5, rx: 1, fill: "var(--text-muted)" }, top);
+  el("rect", { x: 88, y: 265, width: 44, height: 5, rx: 1, fill: "var(--text-muted)" }, top);
+  const SX = y => 10 + ((y * flip) + 5120) / 10240 * 380, SZ = z => 100 - z / 2044 * 90;
+  el("line", { x1: 10, x2: 390, y1: 100, y2: 100, stroke: "var(--line)", "stroke-width": 1.5 }, side);
+  el("line", { x1: 10, x2: 390, y1: 10, y2: 10, stroke: "var(--grid)", "stroke-dasharray": "3 3" }, side);
+  el("rect", { x: 386, y: SZ(642), width: 4, height: 100 - SZ(642), fill: "var(--text-muted)" }, side);
+  el("rect", { x: 10, y: SZ(642), width: 4, height: 100 - SZ(642), fill: "var(--text-muted)" }, side);
+  const tB = el("polyline", { fill: "none", stroke: "var(--ball)", "stroke-opacity": .25, "stroke-width": 1 }, top);
+  const sB = el("polyline", { fill: "none", stroke: "var(--ball)", "stroke-opacity": .25, "stroke-width": 1 }, side);
+  const carsT = c.players.map(p => { const g = el("g", {}, top);
+    if (shooter && p.slot === shooter.slot) el("circle", { r: 8, fill: "none", stroke: "var(--accent)", "stroke-width": 2 }, g);
+    el("circle", { r: 5, fill: p.team === 0 ? "var(--t0)" : "var(--t1)", stroke: "var(--surface-1)", "stroke-width": 1.2 }, g);
+    const t = el("text", { y: -9, "text-anchor": "middle", "font-size": 7, fill: "var(--text-secondary)" }, g); t.textContent = p.name.slice(0, 10);
+    return g; });
+  const carsS = c.players.map(p => { const g = el("g", {}, side);
+    if (shooter && p.slot === shooter.slot) el("circle", { r: 6.5, fill: "none", stroke: "var(--accent)", "stroke-width": 1.8 }, g);
+    el("circle", { r: 4, fill: p.team === 0 ? "var(--t0)" : "var(--t1)", stroke: "var(--surface-1)", "stroke-width": 1 }, g);
+    return g; });
+  const ballT = el("circle", { r: 4, fill: "var(--ball)" }, top), ballS = el("circle", { r: 3.5, fill: "var(--ball)" }, side);
+  const range = card.querySelector("input[type=range]"), tl = card.querySelector(".tlabel");
+  // repère de l'instant du reset sous le curseur
+  range.style.background = "none";
+  function draw(t) {
+    const b = c.ball[t];
+    ballT.setAttribute("cx", TX(b[0])); ballT.setAttribute("cy", TY(b[1]));
+    ballS.setAttribute("cx", SX(b[1])); ballS.setAttribute("cy", SZ(b[2]));
+    const tr = c.ball.slice(Math.max(0, t - 15), t + 1);
+    tB.setAttribute("points", tr.map(p => `${TX(p[0])},${TY(p[1])}`).join(" "));
+    sB.setAttribute("points", tr.map(p => `${SX(p[1])},${SZ(p[2])}`).join(" "));
+    c.cars[t].forEach((p, k) => { carsT[k].setAttribute("transform", `translate(${TX(p[0])},${TY(p[1])})`);
+      carsS[k].setAttribute("transform", `translate(${SX(p[1])},${SZ(p[2])})`); });
+    const dt = (t - c.ir) / 10;
+    tl.innerHTML = dt === 0 ? `<b style="color:var(--accent)">reset</b>` : `${dt > 0 ? "+" : "−"}${Math.abs(dt).toFixed(1)} s`;
+  }
+  let t = c.ir, timer = null, slow = false;
+  draw(t);
+  range.addEventListener("input", () => { t = +range.value; draw(t); });
+  const play = card.querySelector(".play");
+  function stop() { clearInterval(timer); timer = null; play.textContent = "▶ Lecture"; }
+  play.addEventListener("click", () => {
+    if (timer) return stop();
+    if (t >= c.ball.length - 1) t = 0;
+    play.textContent = "❚❚ Pause";
+    timer = setInterval(() => { t++; if (t >= c.ball.length) { t = c.ball.length - 1; stop(); } range.value = t; draw(t); }, slow ? 333 : 100);
+  });
+  card.querySelector(".slow").addEventListener("click", e => { slow = !slow; e.target.setAttribute("aria-pressed", slow); if (timer) { stop(); play.click(); } });
+
+  // --- réponses
+  const a = answers[c.id] || {};
+  card.querySelectorAll("button[data-q]").forEach(b => {
+    b.setAttribute("aria-pressed", a[b.dataset.q] === b.dataset.v);
+    b.addEventListener("click", () => {
+      answers[c.id] = { ...(answers[c.id] || {}), [b.dataset.q]: b.dataset.v };
+      card.querySelectorAll(`button[data-q="${b.dataset.q}"]`).forEach(x => x.setAttribute("aria-pressed", x === b));
+      save();
+    });
+  });
+  const txt = card.querySelector("input[type=text]"); txt.value = a.note || "";
+  txt.addEventListener("change", () => { answers[c.id] = { ...(answers[c.id] || {}), note: txt.value }; save(); });
+});
+render_out();
+</script>
+</body>
+</html>

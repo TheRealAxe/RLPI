@@ -1,0 +1,28 @@
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Données (replays, frames, modèles, logs) — non versionnées
+data/**
+!data/**/
+!data/**/.gitkeep
+*.replay
+
+# Rapports générés (régénérables via rlpi.dashboard / rlpi.swipe)
+reports/**
+!reports/
+!reports/.gitkeep
+
+# OS / éditeurs
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
