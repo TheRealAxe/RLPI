@@ -9,16 +9,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/src \
     RLPI_HOST=0.0.0.0 \
     PORT=3001 \
-    RLPI_REPORTS=/app/data/reports
+    RLPI_REPORTS=/app/data/reports \
+    RLPI_USERS_CACHE=/app/cache
 
 # Seulement ce que le serveur utilise (pas de collecte ni de parsing en production).
 # boto3, redis, psycopg : version multi-joueurs (stockage S3, file Redis, comptes Postgres ; voir rlpi.account).
-RUN pip install --no-cache-dir "polars>=2.1" "pyarrow>=20" "numpy>=2" "python-dotenv>=1.2" "pyyaml>=6" "boto3>=1.35"     "redis>=5" "psycopg[binary]>=3.2"
+RUN pip install --no-cache-dir "polars>=2.1" "pyarrow>=20" "numpy>=2" "python-dotenv>=1.2" "pyyaml>=6" "boto3>=1.35" "redis>=5" "psycopg[binary]>=3.2"
 
 COPY config ./config
 COPY src ./src
 
-RUN useradd --create-home app && mkdir -p /app/data/reports && chown -R app:app /app/data
+# /app/cache : parties des joueurs rassemblées depuis le stockage (rlpi.players). Recréé à partir de Garage si
+# perdu (redéploiement) ; on peut y monter un volume pour le garder. Le volume /app/data peut appartenir à root.
+RUN useradd --create-home app && mkdir -p /app/data/reports /app/cache && chown -R app:app /app/data /app/cache
 USER app
 
 EXPOSE 3001
