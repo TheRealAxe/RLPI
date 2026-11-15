@@ -1,7 +1,6 @@
 # Image du worker RLPI pour Coolify : traite les parties de la file Redis (src/rlpi/worker.py).
-# Les modèles ne sont PAS dans l'image (data/ n'est pas versionné) : ils vivent dans un volume persistant monté
-# sur /app/models (voir docs/DEPLOIEMENT_COOLIFY.md, étape B5). Fichiers requis : value_h5.txt, policy_touch.txt,
-# q_touch.txt, placement_x.txt, placement_y.txt, perf_reference.npz.
+# Les 6 modèles nécessaires sont copiés dans l'image depuis models/ (voir models/README.md) : aucun volume à
+# préparer sur le serveur.
 FROM python:3.13-slim
 
 # libgomp1 : nécessaire à LightGBM
@@ -16,12 +15,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Versions vérifiées le 2026-11-15 (paquets Linux disponibles pour Python 3.13)
 RUN pip install --no-cache-dir "polars>=2.1" "pyarrow>=20" "numpy>=2" "lightgbm==4.7.0" "scikit-learn>=1.9" \
-    "subtr-actor-py==1.5.1" "redis>=5" "boto3>=1.35" "psycopg[binary]>=3.2" "python-dotenv>=1.2" "pyyaml>=6"
+    "subtr-actor-py==1.5.1" "redis>=5" "boto3>=1.35" "psycopg[binary]>=3.2" "python-dotenv>=1.2" "pyyaml>=6" \
+    "python-ballchasing>=0.5.4"
 
 COPY config ./config
 COPY src ./src
+COPY models ./models
 
-RUN useradd --create-home app && mkdir -p /app/models && chown -R app:app /app/models
+RUN useradd --create-home app
 USER app
 
 # En vie si la boucle a tourné depuis moins de 20 min (une partie dure au plus RLPI_GAME_TIMEOUT = 15 min)

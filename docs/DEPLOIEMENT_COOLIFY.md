@@ -189,18 +189,8 @@ Code prêt (2026-11-15) : `src/rlpi/worker.py`, image `Dockerfile.worker`, const
 table Postgres `games` (créée automatiquement). Une partie interrompue est remise en file au redémarrage ; une
 partie en erreur est retentée 3 fois.
 
-**1. Volume des modèles (une seule fois)**
-
-Les modèles ne sont pas dans l'image. Archive prête sur le PC de Théo : `Downloads/RLPI/rlpi-models-worker.zip`
-(24 Mo : `value_h5.txt`, `policy_touch.txt`, `q_touch.txt`, `placement_x.txt`, `placement_y.txt`,
-`perf_reference.npz`). Copier l'archive sur le serveur (ex. `scp rlpi-models-worker.zip luc@m920q:/tmp/`), puis :
-
-```bash
-docker volume create rlpi-models
-docker run --rm -v rlpi-models:/models -v /tmp:/src alpine   sh -c "apk add --no-cache unzip && unzip -o /src/rlpi-models-worker.zip -d /models && chmod -R a+rX /models"
-```
-
-À refaire seulement quand les modèles sont réentraînés.
+**1. Modèles** : rien à faire sur le serveur. Les 6 fichiers nécessaires sont versionnés dans `models/` et copiés
+dans l'image par la GitHub Action (voir `models/README.md` pour les mettre à jour après un réentraînement).
 
 **2. Créer le worker dans Coolify** (après le premier push : l'image doit exister sur ghcr.io)
 
@@ -217,21 +207,20 @@ docker run --rm -v rlpi-models:/models -v /tmp:/src alpine   sh -c "apk add --no
    | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | clé Garage `rlpi-app` |
    | `S3_BUCKET` | `rlpi` |
    | `S3_REGION` | `garage` |
-4. *Persistent Storage* → *+ Add* → *Volume* : nom `rlpi-models`, chemin de destination `/app/models`.
-   (Si Coolify crée un volume à son nom au lieu de réutiliser `rlpi-models`, remplir celui-là avec la commande du 1.)
-5. *Resource Limits* : mémoire **`1g`**, CPU **`1.5`** (mesuré : 410 Mo au pic sur la plus longue partie).
+   | `BALLCHASING_TOKEN` | facultatif : clé API ballchasing, pour mettre en file des parties depuis ballchasing (B6) |
+4. *Resource Limits* : mémoire **`1g`**, CPU **`1.5`** (mesuré : 410 Mo au pic sur la plus longue partie).
    Indispensable : sans limite, un import de 200 parties peut saturer la machine et les autres services de Luc.
-6. Réseau : le worker doit joindre `rlpi-queue`, `rlpi-db` et Garage. Ils sont dans le même projet ; si Garage
+5. Réseau : le worker doit joindre `rlpi-queue`, `rlpi-db` et Garage. Ils sont dans le même projet ; si Garage
    reste sur « stack network only », le rattacher au réseau partagé de Coolify (étape B3).
-7. *Deploy*, puis dans *Logs* : `worker rlpi-worker-… prêt`.
-8. Vérification complète, dans le *Terminal* du conteneur du worker :
+6. *Deploy*, puis dans *Logs* : `worker rlpi-worker-… prêt`.
+7. Vérification complète, dans le *Terminal* du conteneur du worker :
    ```bash
    python -m rlpi.worker check
    ```
    Les quatre lignes doivent être « OK » : modèles, Redis, Postgres, stockage.
-9. Déploiement automatique : ajouter dans GitHub le secret `COOLIFY_WORKER_UUIDS` = UUID du worker (plusieurs
+8. Déploiement automatique : ajouter dans GitHub le secret `COOLIFY_WORKER_UUIDS` = UUID du worker (plusieurs
    séparés par des virgules).
-10. Plus tard : dupliquer en `rlpi-worker-2` et `rlpi-worker-3` (même configuration, même volume des modèles).
+9. Plus tard : dupliquer en `rlpi-worker-2` et `rlpi-worker-3` (même configuration).
 
 Budget total visé :
 
@@ -248,20 +237,28 @@ C'est le CPU, pas la RAM, qui limite le nombre de workers.
 
 ### B6. Premier test de charge
 
-1. Copier 3 replays de Théo sur le serveur, puis dans le conteneur du worker :
+Sans accès SSH, le plus simple est de passer par ballchasing (variable `BALLCHASING_TOKEN` du worker) :
+
+1. Envoyer 3 parties 3v3 classées récentes sur ballchasing.com avec le compte de la clé API (bouton *Upload*,
+   fichiers du dossier `Documents/My Games/Rocket League/TAGame/Demos`). Relevé du 2026-11-15 : l'auto-upload
+   n'a tourné qu'en essai (`--dry-run`), le compte ne contient que des parties de 2019-2020.
+2. Dans le *Terminal* du conteneur du worker :
    ```bash
-   docker cp /tmp/replays <conteneur_du_worker>:/tmp/replays
-   docker exec <conteneur_du_worker> python -m rlpi.worker enqueue --user theo /tmp/replays/*.replay
+   python -m rlpi.worker enqueue --user theo --ballchasing 3
    ```
-   (`docker ps | grep rlpi-worker` donne le nom du conteneur.)
-2. Suivre les *Logs* du worker (`début …`, `fin … : ok en … s`), puis :
+   (les 3 parties classées 3v3 les plus récemment envoyées ; ou `--ballchasing-id <id> <id>` avec les
+   identifiants visibles dans l'adresse des replays sur ballchasing.com).
+3. Suivre les *Logs* du worker (`début …`, `fin … : ok en … s`), puis :
    ```bash
-   docker exec <conteneur_du_worker> python -m rlpi.worker status
+   python -m rlpi.worker status
    ```
-3. Noter dans `docs/JOURNAL.md` : temps par partie, pic de RAM du worker (`docker stats`), température
+4. Noter dans `docs/JOURNAL.md` : temps par partie, pic de RAM du worker (`docker stats`), température
    (`sensors`, paquet `lm-sensors`).
-4. En déduire le temps d'import d'un nouveau joueur (ex. 50 parties ÷ 3 workers × temps par partie) et ajuster
+5. En déduire le temps d'import d'un nouveau joueur (ex. 50 parties ÷ 3 workers × temps par partie) et ajuster
    le nombre de workers et leurs limites.
+
+Avec un accès SSH, on peut aussi copier des fichiers : `docker cp <dossier> <conteneur_du_worker>:/tmp/replays`
+puis `python -m rlpi.worker enqueue --user theo /tmp/replays/*.replay`.
 
 ### B7. Surveillance au quotidien
 

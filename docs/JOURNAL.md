@@ -727,3 +727,9 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
   `COOLIFY_WORKER_UUIDS`.
 - Pas testé localement contre Redis / Postgres / Garage (choix de Théo) : à valider sur le serveur avec
   `python -m rlpi.worker check` puis le test de charge B6.
+- Décision (Théo n'a que l'interface Coolify, pas de SSH) : les 6 modèles du worker sont versionnés dans `models/`
+  (61 Mo, exception à la règle « data/ non versionné », voir `models/README.md`) et copiés dans l'image ; plus de
+  volume `rlpi-models` à préparer. `.gitattributes` : `models/** binary`.
+- `worker enqueue --ballchasing N` / `--ballchasing-id ID…` : met en file des parties téléchargées depuis
+  ballchasing (pour tester sans SSH). L'API refuse `sort-by=upload-date` : tri `created`. Constat : l'auto-upload
+  n'a jamais tourné qu'en `--dry-run`, le compte ballchasing de la clé ne contient que des parties 2019-2020.

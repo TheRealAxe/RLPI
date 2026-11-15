@@ -1,3 +1,6 @@
 * text=auto
 *.cmd text eol=crlf
 *.xlsx binary
+
+# Modèles du worker : copiés tels quels (pas de conversion des fins de ligne)
+models/** binary

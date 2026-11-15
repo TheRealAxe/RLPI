@@ -13,6 +13,9 @@ Commandes (dans le conteneur du worker) :
     python -m rlpi.worker run                                  # boucle principale (commande par défaut de l'image)
     python -m rlpi.worker check                                # vérifie modèles, Redis, Postgres et stockage
     python -m rlpi.worker enqueue --user theo a.replay b.replay
+    python -m rlpi.worker enqueue --user theo --ballchasing 3  # 3 parties 3v3 classées les plus récemment
+                                                               # envoyées sur ballchasing (clé BALLCHASING_TOKEN)
+    python -m rlpi.worker enqueue --user theo --ballchasing-id <id> <id>
     python -m rlpi.worker status [--user theo]                 # nombre de parties par statut, dernières erreurs
 
 Variables d'environnement :
@@ -21,6 +24,7 @@ Variables d'environnement :
     RLPI_MODELS                                   dossier des modèles (/app/models dans l'image)
     RLPI_KEEP_REPLAYS                             1 (défaut) garde le .replay dans le stockage, 0 le supprime
     RLPI_GAME_TIMEOUT                             durée maximale d'une partie en secondes (défaut 900)
+    BALLCHASING_TOKEN                             facultatif, seulement pour enqueue --ballchasing
 """
 from __future__ import annotations
 
@@ -136,6 +140,31 @@ def enqueue(user: str, files: list[str]) -> None:
                 (user, f.stem, key))
             r.lpush(QUEUE, json.dumps({"user": user, "replay": f.stem, "key": key}))
             log(f"en file : {user}/{f.name}")
+
+
+def enqueue_ballchasing(user: str, n: int = 0, ids: list[str] | None = None) -> None:
+    """Télécharge des replays ballchasing puis les met en file. Utile pour tester sans copier de fichier sur le
+    serveur. `ids` : identifiants de replays (publics, ou envoyés par le titulaire de la clé) ; `n` : les n parties
+    3v3 classées les plus récemment envoyées par le titulaire de la clé API (BALLCHASING_TOKEN)."""
+    from rlpi.config import ballchasing_api
+
+    api = ballchasing_api()
+    tmp = Path(tempfile.mkdtemp(prefix="rlpi_bc_"))
+    try:
+        todo = list(ids or [])
+        if n:
+            # « created » = date d'envoi sur ballchasing (l'API refuse « upload-date »)
+            todo += [r["id"] for r in api.get_replays(uploader="me", playlist="ranked-standard", sort_by="created",
+                                                      count=n)]
+        files = []
+        for rid in todo:
+            files.append(str(api.download_replay(rid, tmp)))
+            log(f"téléchargé depuis ballchasing : {rid}")
+        if not files:
+            log("aucune partie trouvée sur ballchasing")
+        enqueue(user, files)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -312,7 +341,10 @@ def main() -> None:
     sub.add_parser("check")
     s = sub.add_parser("enqueue")
     s.add_argument("--user", required=True, help="identifiant du joueur (dossier dans le stockage)")
-    s.add_argument("files", nargs="+")
+    s.add_argument("files", nargs="*")
+    s.add_argument("--ballchasing", type=int, metavar="N", default=0,
+                   help="mettre en file les N parties classées 3v3 les plus récemment envoyées sur ballchasing")
+    s.add_argument("--ballchasing-id", nargs="+", default=[], metavar="ID", help="identifiants de replays ballchasing")
     s = sub.add_parser("status")
     s.add_argument("--user")
     a = ap.parse_args()
@@ -321,7 +353,12 @@ def main() -> None:
     elif a.cmd == "check":
         check()
     elif a.cmd == "enqueue":
-        enqueue(a.user, a.files)
+        if a.ballchasing or a.ballchasing_id:
+            enqueue_ballchasing(a.user, a.ballchasing, a.ballchasing_id)
+        if a.files:
+            enqueue(a.user, a.files)
+        if not (a.files or a.ballchasing or a.ballchasing_id):
+            ap.error("donner des fichiers .replay, --ballchasing N ou --ballchasing-id ID…")
     else:
         status(a.user)
 
