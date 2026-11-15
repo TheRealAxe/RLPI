@@ -1,11 +1,14 @@
 # À copier dans le repo de l'app : .github/workflows/deploy.yml
 #
-# À chaque push sur main : construit l'image Docker (à partir du Dockerfile à la racine),
-# la publie sur ghcr.io (package privé), puis demande à Coolify de la redéployer.
+# À chaque push sur main : construit les deux images Docker, les publie sur ghcr.io (packages privés),
+# puis demande à Coolify de redéployer le tableau de bord et les workers.
+#   Dockerfile         → ghcr.io/<repo>          tableau de bord (rlpi.serve)
+#   Dockerfile.worker  → ghcr.io/<repo>-worker   worker de traitement des parties (rlpi.worker)
 #
 # Secrets à créer dans le repo (Settings > Secrets and variables > Actions) :
-#   COOLIFY_TOKEN     jeton Coolify, permission « deploy » uniquement (fourni par Luc)
-#   COOLIFY_APP_UUID  identifiant de l'app dans Coolify (fourni par Luc)
+#   COOLIFY_TOKEN         jeton Coolify, permission « deploy » uniquement (fourni par Luc)
+#   COOLIFY_APP_UUID      identifiant de l'app tableau de bord dans Coolify (fourni par Luc)
+#   COOLIFY_WORKER_UUIDS  identifiants des workers, séparés par des virgules (facultatif tant qu'il n'y en a pas)
 name: Build & deploy
 
 on:
@@ -49,14 +52,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.IMAGE }}-worker:latest
+            ${{ env.IMAGE }}-worker:sha-${{ github.sha }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,scope=worker,mode=max
+
       - name: Déploiement sur Coolify
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
           COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
+          COOLIFY_WORKER_UUIDS: ${{ secrets.COOLIFY_WORKER_UUIDS }}
         run: |
           # Retire espaces et retours à la ligne collés par erreur avec les secrets
           TOKEN="$(printf '%s' "$COOLIFY_TOKEN" | tr -d '[:space:]')"
-          UUID="$(printf '%s' "$COOLIFY_APP_UUID" | tr -d '[:space:]')"
-          curl -fsS -X POST \
-            -H "Authorization: Bearer $TOKEN" \
-            "https://coolify.lainox.quest/api/v1/deploy?uuid=$UUID"
+          UUIDS="$(printf '%s,%s' "$COOLIFY_APP_UUID" "$COOLIFY_WORKER_UUIDS" | tr -d '[:space:]')"
+          for UUID in ${UUIDS//,/ }; do
+            echo "Redéploiement de $UUID"
+            curl -fsS -X POST \
+              -H "Authorization: Bearer $TOKEN" \
+              "https://coolify.lainox.quest/api/v1/deploy?uuid=$UUID"
+          done

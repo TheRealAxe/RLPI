@@ -674,3 +674,56 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
 - Fichiers lus par le tableau de bord (≈ 294 Mo) : `data/features/*` utilisés, `data/models/{perf_report,styles,
   value_h5_report}.json`, `data/frames/theo/`, et dans `data/frames/rlcs/` tous les `.meta.json` + 200 parquets
   (échantillon des heatmaps).
+
+## 2026-11-15 — Mode opératoire Coolify (version multi-joueurs)
+
+- `docs/DEPLOIEMENT_COOLIFY.md` : partie A (tableau de bord actuel : image ghcr, volume `/app/data`, variables,
+  déploiement GitHub) et partie B (Postgres, Redis, MinIO, sauvegardes R2/B2, workers ×3 limités à 1 Go / 1,5 CPU).
+- Serveur : M920q de Luc, i5-9400T 6 cœurs, 16 Go, NVMe 476 Go. Budget RLPI ≈ 5 Go de RAM (mesures : modèles 195 Mo, parsing d'un replay 5,7 s et 310 Mo en pic).
+- Estimation de stockage : ≈ 0,9 Mo par partie extraite (frames 0,69 + features 0,22), ≈ 2,5 Mo avec le replay brut.
+- Reste à faire côté code avant les workers : pipeline découpé partie par partie, `Dockerfile.worker`,
+  mesure du temps de traitement d'une partie.
+- Infra en place sur Coolify (projet `RLPI`, environnement `production`) : `rlpi-db` (Postgres), `rlpi-queue`
+  (redis:8, privé), `rlpi-storage` (Garage v2.3.0 : nœud déjà configuré par Coolify, bucket `rlpi`, clé `rlpi-app`
+  en lecture/écriture, quota 100 GiB). Tout est en *Running*. Secrets gardés par Théo, hors Git.
+- Reste côté serveur : retrait des URL publiques de Garage, rattachement au réseau partagé, sauvegardes externes.
+
+## 2026-11-15 — Traitement partie par partie (préparation des workers)
+
+- Généralisation reprise de la copie « partage » (hors Git) : `config.SOURCE` (`RLPI_SOURCE`, « theo » par défaut),
+  `config.PLAYER` / `config.COMPARE` (profil de Théo par défaut quand la source est « theo »), `app.py`,
+  console UTF-8. Les rapports gardent les clés `perso_team_acc` / `perso_n_matches` ; repli sur les anciennes
+  clés `theo_*` dans le tableau de bord et la page des modèles. `decisions touches-theo` reste accepté.
+- `config` : `RLPI_DATA` et `RLPI_MODELS` permettent de travailler dans un autre dossier (une partie = un dossier).
+- `perf` : la référence SSL (médianes, écarts, poids, distributions triées) est enregistrée dans
+  `data/models/perf_reference.npz` à chaque `python -m rlpi.perf` ; `python -m rlpi.perf score --source X` note
+  une source sans réapprendre. Vérifié : perf_ssl et perf_theo identiques à l'ancienne version (écarts du rapport
+  ≤ 1e-16 sur le test-retest).
+- `rlpi.game` : `run <replay> --out <dossier>` traite une partie seule dans un processus séparé (frames, stats,
+  valeur, buts, décisions, placement, passes, perf, défense, engagements, meilleur jeu) et écrit `result.json`
+  (statut ok / partiel / rejetee, durée par étape, erreurs). `merge <parties> --into <data> --source X`
+  reconstruit les tables d'un joueur (doublons MatchGUID écartés comme dans `rlpi.stats`).
+- Équivalence vérifiée sur 11 parties (10 du dossier Demos + 1 de setTest2026) : lot classique vs partie par
+  partie + merge → toutes les tables, types compris, le meilleur jeu (X + lignes), les courbes de valeur et les
+  33 fichiers d'images sont identiques.
+- Mesures (PC de Théo) : 9 à 26 s par partie ; l'étape stats (subtr-actor `get_summed_stats`) prend ~60 % du
+  temps, frames ~30 %. Pic mémoire 410 Mo sur la plus longue partie → limite de 1 Go par worker confirmée.
+- Pas encore fait : synergie, actions à revoir et tableau de bord restent au niveau du joueur (après merge) ;
+  `Dockerfile.worker`, file Redis et stockage Garage. `perf_reference.npz` devra être embarqué avec les modèles.
+- Piste d'optimisation : le replay est lu 3 fois (frames, événements, stats) ; une seule lecture ferait gagner
+  plusieurs secondes par partie.
+
+## 2026-11-15 — Worker (file Redis → Garage → Postgres)
+
+- `src/rlpi/worker.py` : `run` (boucle : BLMOVE de `rlpi:queue` vers `rlpi:processing:<worker>`, téléchargement du
+  replay, `rlpi.game run`, envoi du dossier de la partie dans `users/<joueur>/games/<replay>/`, statut dans la table
+  `games`), `enqueue --user X fichiers…`, `status`, `check`. Reprise des tâches interrompues au démarrage,
+  3 essais en cas d'erreur, arrêt propre sur SIGTERM, fichier de vie pour le contrôle de santé Docker.
+- `Dockerfile.worker` (python:3.13-slim + libgomp1) ; paquets Linux vérifiés : subtr-actor-py 1.5.1,
+  lightgbm 4.7.0, psycopg-binary 3.3.9, redis 8.1.0, boto3 1.44.3. Modèles dans un volume `/app/models`
+  (archive `rlpi-models-worker.zip`, 24 Mo, 6 fichiers) : `data/` n'étant pas versionné, la GitHub Action ne peut
+  pas les embarquer.
+- GitHub Action : deuxième image `ghcr.io/<repo>-worker`, redéploiement des workers listés dans le secret
+  `COOLIFY_WORKER_UUIDS`.
+- Pas testé localement contre Redis / Postgres / Garage (choix de Théo) : à valider sur le serveur avec
+  `python -m rlpi.worker check` puis le test de charge B6.

@@ -1,0 +1,31 @@
+# Image du worker RLPI pour Coolify : traite les parties de la file Redis (src/rlpi/worker.py).
+# Les modèles ne sont PAS dans l'image (data/ n'est pas versionné) : ils vivent dans un volume persistant monté
+# sur /app/models (voir docs/DEPLOIEMENT_COOLIFY.md, étape B5). Fichiers requis : value_h5.txt, policy_touch.txt,
+# q_touch.txt, placement_x.txt, placement_y.txt, perf_reference.npz.
+FROM python:3.13-slim
+
+# libgomp1 : nécessaire à LightGBM
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    RLPI_MODELS=/app/models \
+    RLPI_DATA=/tmp/rlpi-data
+
+# Versions vérifiées le 2026-11-15 (paquets Linux disponibles pour Python 3.13)
+RUN pip install --no-cache-dir "polars>=2.1" "pyarrow>=20" "numpy>=2" "lightgbm==4.7.0" "scikit-learn>=1.9" \
+    "subtr-actor-py==1.5.1" "redis>=5" "boto3>=1.35" "psycopg[binary]>=3.2" "python-dotenv>=1.2" "pyyaml>=6"
+
+COPY config ./config
+COPY src ./src
+
+RUN useradd --create-home app && mkdir -p /app/models && chown -R app:app /app/models
+USER app
+
+# En vie si la boucle a tourné depuis moins de 20 min (une partie dure au plus RLPI_GAME_TIMEOUT = 15 min)
+HEALTHCHECK --interval=60s --timeout=5s --start-period=60s \
+  CMD python -c "import os,sys,tempfile,time; p=os.path.join(tempfile.gettempdir(),'rlpi_worker_heartbeat'); sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 1200 else 1)"
+
+CMD ["python", "-m", "rlpi.worker", "run"]
