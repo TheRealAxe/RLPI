@@ -82,6 +82,35 @@ def dashboard_html(ids: list[str], names: dict, days: list, sel: str, since: str
     return PAGES.compute(key, build)
 
 
+def live_enabled() -> bool:
+    """Données à jour disponibles : base et stockage configurés (production), et un joueur principal réglé."""
+    from rlpi import account
+
+    return bool(config.PLAYER) and account.configured()
+
+
+def player_page(pid: str, q: dict) -> tuple[str, int] | None:
+    """Tableau de bord d'un joueur à partir de ses parties traitées par les workers (toujours à jour).
+    Retourne (page, nombre de parties), ou None s'il n'a encore aucune partie traitée."""
+    from rlpi import players
+
+    get = lambda k: (q.get(k) or [""])[0].strip() or None  # noqa: E731
+    data, n = players.build(pid)  # rapatrie les nouvelles parties depuis le stockage
+    if data is None:
+        return None
+    stats = data / "features" / "player_match_stats_perso.parquet"
+    args = (get("j"), get("du"), get("au"),
+            [x for x in (get("avec") or "").split(",") if x], [x for x in (get("sans") or "").split(",") if x])
+    key = ("moi", pid, args[:3], tuple(args[3]), tuple(args[4]), stats.stat().st_mtime if stats.exists() else 0)
+
+    def build() -> str:
+        d = players.payload(pid, data, *args)
+        return (TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", json.dumps(d, ensure_ascii=False))
+                .replace(PLACEHOLDER, font_css()))
+
+    return PAGES.compute(key, build), n
+
+
 def warm_defaults(since: str | None) -> None:
     """Pré-calcule la page par défaut (sans filtre) de chaque profil, pour que le premier visiteur n'attende pas."""
     t0 = time.perf_counter()
@@ -92,9 +121,31 @@ def warm_defaults(since: str | None) -> None:
 
 
 def warm_loop(since: str | None) -> None:
-    """Au démarrage puis dès que de nouvelles parties arrivent (le fichier des stats change), pré-calcule."""
+    """Au démarrage puis dès que de nouvelles parties arrivent (le fichier des stats change), pré-calcule.
+    En production, rapatrie aussi chaque minute les nouvelles parties du joueur principal et recalcule sa page."""
     last = None
+    if live_enabled():
+        try:  # le joueur principal doit être inscrit pour que les workers cherchent ses parties toutes les 15 min
+            from rlpi import store
+
+            with store.db() as c:
+                new = c.execute("INSERT INTO accounts (player_id) VALUES (%s) ON CONFLICT (player_id) DO NOTHING "
+                                "RETURNING player_id", (config.PLAYER,)).fetchone()
+            if new:
+                store.push_sync(store.redis_client(), config.PLAYER)
+                print(f"joueur principal {config.PLAYER} inscrit : recherche de ses parties lancée", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"inscription du joueur principal : {type(e).__name__}: {e}", flush=True)
     while True:
+        if live_enabled():
+            try:
+                t0 = time.perf_counter()
+                r = player_page(config.PLAYER, {})
+                if r and time.perf_counter() - t0 > 1:  # recalcul réel (nouvelles parties), pas une lecture du cache
+                    print(f"pré-calcul : tableau de bord à jour ({r[1]} parties) en {time.perf_counter() - t0:.1f} s",
+                          flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"pré-calcul (données à jour) : {type(e).__name__}: {e}", flush=True)
         try:
             m = STATS.stat().st_mtime if STATS.exists() else None
             if m is not None and m != last:
@@ -185,38 +236,32 @@ class Handler(SimpleHTTPRequestHandler):
         return self.my_dashboard(pid, q)
 
     def my_dashboard(self, pid: str, q: dict) -> None:
-        from rlpi import account, players
+        from rlpi import account
 
         get = lambda k: (q.get(k) or [""])[0].strip() or None  # noqa: E731
         msg = {"1": "Recherche lancée : les nouvelles parties arrivent dans quelques minutes.",
                "attente": "Recherche déjà faite il y a moins de 5 minutes."}.get(get("recherche") or "")
         try:
-            data, n = players.build(pid)
-        except Exception as e:  # noqa: BLE001 — stockage ou base indisponible…
+            r = player_page(pid, q)
+        except Exception as e:  # noqa: BLE001 — stockage, base ou calcul indisponible…
             print(f"joueur {pid} : {type(e).__name__}: {e}", flush=True)
-            return self.send_html(account.page("RLPI", "<p>Tes données sont momentanément indisponibles. "
+            return self.send_html(account.page("RLPI", "<p>Ton tableau de bord n'a pas pu être calculé. "
                                                        "Réessaie dans un instant.</p>"), 503)
-        if data is None:
+        if r is None:
             return self.send_html(account.import_page(pid, account.import_state(pid)))
-        stats = data / "features" / "player_match_stats_perso.parquet"
-        args = (get("j"), get("du"), get("au"),
-                [x for x in (get("avec") or "").split(",") if x], [x for x in (get("sans") or "").split(",") if x])
-        key = ("moi", pid, args[:3], tuple(args[3]), tuple(args[4]),
-               stats.stat().st_mtime if stats.exists() else 0)
-
-        def build() -> str:
-            d = players.payload(pid, data, *args)
-            return (TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", json.dumps(d, ensure_ascii=False))
-                    .replace(PLACEHOLDER, font_css()))
-
-        try:
-            page_html = PAGES.compute(key, build)
-        except Exception as e:  # noqa: BLE001
-            print(f"joueur {pid} : {type(e).__name__}: {e}", flush=True)
-            return self.send_html(account.page("RLPI", "<p>Ton tableau de bord n'a pas pu être calculé.</p>"), 500)
+        page_html, n = r
         self.send_html(page_html.replace("</body>", account.toolbar(pid, n, msg) + "</body>", 1))
 
     def dashboard(self, q: dict) -> None:
+        if live_enabled():
+            try:
+                r = player_page(config.PLAYER, q)
+                if r is not None:
+                    return self.send_html(r[0])
+                print(f"tableau de bord : aucune partie traitée pour {config.PLAYER}, copie des données utilisée",
+                      flush=True)
+            except Exception as e:  # noqa: BLE001 — base ou stockage indisponible : on sert la copie des données
+                print(f"tableau de bord (données à jour) : {type(e).__name__}: {e}", flush=True)
         ids, names, days = roster()
         get = lambda k: (q.get(k) or [""])[0].strip() or None  # noqa: E731
         sel = get("j") if get("j") in ids else ids[0]

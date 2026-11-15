@@ -849,3 +849,16 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
 - Références : 50 de l'indice = performance SSL médiane (la phrase disait « moyenne de tes parties ») ; le sélecteur
   SSL/RLCS s'appelle « Mon jeu face aux » et n'apparaît que sur Mon jeu / Tous les indicateurs.
 - Limite : le meilleur jeu reste calculé hors ligne sur les 10 dernières parties, il ne suit pas la période.
+
+## 2026-11-16 — Tableau de bord en ligne toujours à jour
+
+- Constat (Théo) : la page publique s'arrêtait au 14/11. Cause : `/tableau_de_bord.html` lisait la copie des données
+  envoyée dans le volume `/app/data` le 15/11 ; seules les pages `/moi` suivaient les parties traitées par les workers.
+- `serve.py` : en production (base + stockage configurés), `/tableau_de_bord.html` est construit comme `/moi` à partir
+  des parties du joueur principal (`RLPI_PLAYER`, Théo par défaut) traitées par les workers (`player_page`, même cache
+  que `/moi`). Copie de `/app/data` utilisée seulement en secours (aucune partie traitée, base ou stockage en panne).
+- Au démarrage, le joueur principal est inscrit dans `accounts` s'il ne l'est pas (sinon les workers ne cherchent pas
+  ses parties) ; chaque minute, le pré-calcul rapatrie ses nouvelles parties et recalcule sa page.
+- Délai d'apparition d'une partie : envoi sur ballchasing (auto-upload) → recherche des workers (≤ 15 min) →
+  traitement (≈ 20 s) → page (≤ 1 min).
+- Testé en local avec base et stockage simulés (données à jour, aucune partie, panne) ; pas encore vérifié en production.
