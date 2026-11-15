@@ -71,9 +71,21 @@ def log(msg: str) -> None:
 
 def env(name: str, default: str | None = None) -> str:
     v = os.getenv(name, default)
-    if v is None or not str(v).strip():
+    # Espaces et guillemets collés par erreur avec la valeur dans Coolify
+    v = str(v).strip().strip("\"'").strip() if v is not None else ""
+    if not v:
         raise SystemExit(f"Variable d'environnement manquante : {name}")
-    return str(v).strip()
+    return v
+
+
+def url(name: str, schemes: tuple[str, ...]) -> str:
+    """Lit une URL de connexion et vérifie son début, sans jamais afficher la valeur (elle contient un mot de passe)."""
+    v = env(name)
+    if not v.startswith(schemes):
+        start = v.split("://")[0][:12] if "://" in v else "(pas de « :// »)"
+        raise SystemExit(f"{name} doit commencer par {' ou '.join(schemes)} ; elle commence par : {start} "
+                         f"({len(v)} caractères). Copier l'URL « internal » avec l'icône de copie dans Coolify.")
+    return v
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -83,14 +95,14 @@ def env(name: str, default: str | None = None) -> str:
 def redis_client():
     import redis
 
-    return redis.Redis.from_url(env("REDIS_URL"), decode_responses=True, socket_timeout=60,
-                                socket_connect_timeout=10, health_check_interval=30)
+    return redis.Redis.from_url(url("REDIS_URL", ("redis://", "rediss://")), decode_responses=True,
+                                socket_timeout=60, socket_connect_timeout=10, health_check_interval=30)
 
 
 def db():
     import psycopg
 
-    return psycopg.connect(env("DATABASE_URL"), autocommit=True)
+    return psycopg.connect(url("DATABASE_URL", ("postgres://", "postgresql://")), autocommit=True)
 
 
 def s3():
