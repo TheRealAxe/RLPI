@@ -109,7 +109,12 @@ def s3():
     import boto3
     from botocore.config import Config
 
-    return boto3.client("s3", endpoint_url=env("S3_ENDPOINT"), aws_access_key_id=env("S3_ACCESS_KEY"),
+    endpoint = env("S3_ENDPOINT").rstrip("/")
+    if not endpoint.startswith(("http://", "https://")) or " " in endpoint:
+        # L'adresse ne contient pas de secret : on peut l'afficher pour aider à la corriger
+        raise SystemExit(f"S3_ENDPOINT invalide : « {endpoint} ». Attendu : http://<nom du conteneur Garage>:3900, "
+                         "par exemple http://garage-fj4rezthgm9pyk3rggqpjsw6:3900")
+    return boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=env("S3_ACCESS_KEY"),
                         aws_secret_access_key=env("S3_SECRET_KEY"), region_name=env("S3_REGION", "garage"),
                         config=Config(s3={"addressing_style": "path"}, retries={"max_attempts": 5}))
 
