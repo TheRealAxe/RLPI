@@ -787,3 +787,8 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
 - Conséquence à retenir : avec ce compte, 200 nouvelles parties par heure au maximum pour tout le service
   (≈ 4 nouveaux inscrits par heure à 50 parties). Un abonnement ballchasing plus élevé relève la limite
   (gold 400/h, diamond 1 000/h, champion 2 000/h) : régler alors `RLPI_BC_DOWNLOAD_INTERVAL`.
+- Premier import réel (logs du worker, 2026-11-15) : recherche de LAinox → 50 parties, puis Théo → 6 nouvelles
+  seulement (les autres déjà connues : parties partagées traitées une seule fois). Traitement sur le M920q :
+  13 à 21 s par partie, jusqu'à 35 s pour les plus longues, toutes « ok » (16 fichiers par partie).
+  ≈ 17 s en moyenne → un worker traite ≈ 200 parties par heure, soit la limite de téléchargement du compte
+  ballchasing « regular » : un 2e worker n'accélère l'import que si la limite ballchasing est relevée.
