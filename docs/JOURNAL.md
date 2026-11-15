@@ -862,3 +862,13 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
 - Délai d'apparition d'une partie : envoi sur ballchasing (auto-upload) → recherche des workers (≤ 15 min) →
   traitement (≈ 20 s) → page (≤ 1 min).
 - Testé en local avec base et stockage simulés (données à jour, aucune partie, panne) ; pas encore vérifié en production.
+
+## 2026-11-16 — Démos et bumps manquants comptés comme 0
+
+- Constat (Théo, en ligne) : 6 parties sur la période et « Il faut au moins 5 parties pour définir ton style ».
+  Cause : le replay n'a pas de bloc démo quand personne ne démolit de tout le match (58 joueurs-matchs sur la source
+  theo, 4 pour les bumps) ; `demos` / `bumps` valaient null et `style_section` écarte toute partie dont un trait
+  manque → 32 parties utilisables sur 41, et moins de 5 sur certaines périodes courtes.
+- `metrics()` : `demo.demos_inflicted` et `bump.bumps_inflicted` absents = 0. Toutes les parties ont désormais leurs
+  traits (41/41) ; style attribué sur 6 parties. Effet de bord voulu : la moyenne « Démos infligées » baisse (les
+  matchs sans démo n'étaient pas comptés). `styles.json` (appris avec ces trous) n'est pas réentraîné.

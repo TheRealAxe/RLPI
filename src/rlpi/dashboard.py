@@ -64,8 +64,9 @@ def metrics(df: pl.DataFrame) -> pl.DataFrame:
         frappes_fortes=per5(c("touch.hard_hit_count")),
         ratees=per5(c("whiff.whiff_count")),
         # Agressivité
-        demos=per5(c("demo.demos_inflicted")),
-        bumps=per5(c("bump.bumps_inflicted")),
+        # bloc absent du replay quand personne n'a démoli / bumpé de tout le match : c'est 0, pas une donnée manquante
+        demos=per5(c("demo.demos_inflicted").fill_null(0)),
+        bumps=per5(c("bump.bumps_inflicted").fill_null(0)),
         moitie_adverse=pct(c("positioning.time_offensive_half"), tp),
         devant_balle=pct(c("positioning.time_in_front_of_ball"), tp),
         # Rotation / placement
