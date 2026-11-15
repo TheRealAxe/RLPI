@@ -5,8 +5,9 @@
 - Sert le dossier reports/ (page d'accueil, swipe, archives…).
 - /tableau_de_bord.html est calculé à chaque demande selon l'adresse :
     ?j=<id du joueur affiché>&du=AAAA-MM-JJ&au=AAAA-MM-JJ&avec=<id>,<id>&sans=<id>
-  (sans paramètre : profil RLPI_PLAYER du .env, parties à partir de --since). Environ 2 s par nouvelle combinaison,
-  puis mise en cache tant que les données ne changent pas.
+  (sans paramètre : profil RLPI_PLAYER du .env, parties à partir de --since). 3 à 9 s par nouvelle combinaison,
+  puis mise en cache (mémoire + disque, voir rlpi.pagecache) tant que les données et le code ne changent pas.
+  La page par défaut de chaque profil est pré-calculée au démarrage et dès que de nouvelles parties arrivent.
 - N'écoute que sur 127.0.0.1 par défaut.
 - /health répond « ok » (contrôle de santé du conteneur).
 - Version multi-joueurs (voir rlpi.account et rlpi.players) : /connexion (Steam), /moi (tableau de bord du joueur
@@ -20,6 +21,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import threading
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -29,6 +32,8 @@ import polars as pl
 from rlpi import config
 from rlpi.config import ROOT, SOURCE
 from rlpi.dashboard import FEAT, make_payload
+from rlpi.fonts import PLACEHOLDER, font_css  # polices intégrées dans la page (plus de Google Fonts)
+from rlpi.pagecache import PageCache
 
 REPORTS = Path(os.getenv("RLPI_REPORTS") or ROOT / "reports")
 TEMPLATE = Path(__file__).parent / "dashboard_template.html"
@@ -53,9 +58,55 @@ def roster() -> tuple[list[str], dict[str, str], list[dict]]:
     return ids, names, days
 
 
+PAGES = PageCache()          # cache des pages : mémoire + disque (voir rlpi.pagecache)
+WARM_EVERY_S = 60            # vérification des nouvelles parties pour le pré-calcul
+
+
+def dashboard_html(ids: list[str], names: dict, days: list, sel: str, since: str | None, until: str | None,
+                   avec: list[str], sans: list[str]) -> str:
+    """Page du tableau de bord général pour une combinaison de filtres (calculée une fois, puis en cache)."""
+    key = ("tdb", sel, since, until, tuple(avec), tuple(sans), STATS.stat().st_mtime)
+
+    def build() -> str:
+        try:
+            payload = make_payload(sel, [i for i in ids if i != sel], since, until, avec, sans)
+            err = None
+        except SystemExit as e:  # aucune partie pour ce filtre
+            payload, err = None, str(e)
+        data = {"dynamic": True, "default": sel, "order": ids, "names": names, "days": days,
+                "filters": {"j": sel, "du": since, "au": until, "avec": avec, "sans": sans},
+                "profiles": {sel: payload} if payload else {}, "error": err}
+        return (TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", json.dumps(data, ensure_ascii=False))
+                .replace(PLACEHOLDER, font_css()))
+
+    return PAGES.compute(key, build)
+
+
+def warm_defaults(since: str | None) -> None:
+    """Pré-calcule la page par défaut (sans filtre) de chaque profil, pour que le premier visiteur n'attende pas."""
+    t0 = time.perf_counter()
+    ids, names, days = roster()
+    for sel in ids:
+        dashboard_html(ids, names, days, sel, since, None, [], [])
+    print(f"pré-calcul : {len(ids)} tableaux de bord prêts en {time.perf_counter() - t0:.1f} s", flush=True)
+
+
+def warm_loop(since: str | None) -> None:
+    """Au démarrage puis dès que de nouvelles parties arrivent (le fichier des stats change), pré-calcule."""
+    last = None
+    while True:
+        try:
+            m = STATS.stat().st_mtime if STATS.exists() else None
+            if m is not None and m != last:
+                warm_defaults(since)
+                last = m
+        except Exception as e:  # noqa: BLE001 — le pré-calcul ne doit jamais faire tomber le serveur
+            print(f"pré-calcul : {type(e).__name__}: {e}", flush=True)
+        time.sleep(WARM_EVERY_S)
+
+
 class Handler(SimpleHTTPRequestHandler):
     since_default: str | None = None
-    cache: dict = {}
 
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(REPORTS), **kw)
@@ -151,16 +202,18 @@ class Handler(SimpleHTTPRequestHandler):
         args = (get("j"), get("du"), get("au"),
                 [x for x in (get("avec") or "").split(",") if x], [x for x in (get("sans") or "").split(",") if x])
         key = ("moi", pid, args[:3], tuple(args[3]), tuple(args[4]),
-               stats.stat().st_mtime if stats.exists() else 0, TEMPLATE.stat().st_mtime)
-        page_html = self.cache.get(key)
-        if page_html is None:
-            try:
-                d = players.payload(pid, data, *args)
-            except Exception as e:  # noqa: BLE001
-                print(f"joueur {pid} : {type(e).__name__}: {e}", flush=True)
-                return self.send_html(account.page("RLPI", "<p>Ton tableau de bord n'a pas pu être calculé.</p>"), 500)
-            page_html = TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", json.dumps(d, ensure_ascii=False))
-            self.cache[key] = page_html
+               stats.stat().st_mtime if stats.exists() else 0)
+
+        def build() -> str:
+            d = players.payload(pid, data, *args)
+            return (TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", json.dumps(d, ensure_ascii=False))
+                    .replace(PLACEHOLDER, font_css()))
+
+        try:
+            page_html = PAGES.compute(key, build)
+        except Exception as e:  # noqa: BLE001
+            print(f"joueur {pid} : {type(e).__name__}: {e}", flush=True)
+            return self.send_html(account.page("RLPI", "<p>Ton tableau de bord n'a pas pu être calculé.</p>"), 500)
         self.send_html(page_html.replace("</body>", account.toolbar(pid, n, msg) + "</body>", 1))
 
     def dashboard(self, q: dict) -> None:
@@ -171,19 +224,7 @@ class Handler(SimpleHTTPRequestHandler):
         until = get("au")
         avec = [x for x in (get("avec") or "").split(",") if x in ids and x != sel]
         sans = [x for x in (get("sans") or "").split(",") if x in ids and x != sel and x not in avec]
-        key = (sel, since, until, tuple(avec), tuple(sans), STATS.stat().st_mtime, TEMPLATE.stat().st_mtime)
-        html = self.cache.get(key)
-        if html is None:
-            try:
-                payload = make_payload(sel, [i for i in ids if i != sel], since, until, avec, sans)
-                err = None
-            except SystemExit as e:  # aucune partie pour ce filtre
-                payload, err = None, str(e)
-            data = {"dynamic": True, "default": sel, "order": ids, "names": names, "days": days,
-                    "filters": {"j": sel, "du": since, "au": until, "avec": avec, "sans": sans},
-                    "profiles": {sel: payload} if payload else {}, "error": err}
-            html = TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", json.dumps(data, ensure_ascii=False))
-            self.cache[key] = html
+        html = dashboard_html(ids, names, days, sel, since, until, avec, sans)
         body = html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -201,6 +242,7 @@ def main() -> None:
     a = ap.parse_args()
     Handler.since_default = a.since
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
+    threading.Thread(target=warm_loop, args=(a.since,), daemon=True, name="pre-calcul").start()
     print(f"Rapports sur http://{a.host}:{a.port}/ (dossier {REPORTS}, Ctrl+C pour arrêter)", flush=True)
     srv.serve_forever()
 

@@ -792,3 +792,37 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
   13 à 21 s par partie, jusqu'à 35 s pour les plus longues, toutes « ok » (16 fichiers par partie).
   ≈ 17 s en moyenne → un worker traite ≈ 200 parties par heure, soit la limite de téléchargement du compte
   ballchasing « regular » : un 2e worker n'accélère l'import que si la limite ballchasing est relevée.
+
+## 2026-11-16 — Polices hébergées localement
+
+- Mesure (sans rien changer) : tableau de bord prêt en ~0,2 s et onglets en 10–25 ms, mais à froid la feuille
+  Google Fonts a mis 5,1 s puis 4,4 s pour un fichier de police ; chargée par `@import` dans le `<style>`, elle
+  bloquait l'affichage de toute la page. Cause principale de la lenteur ressentie.
+- `reports/fonts/` : Sofia Sans et Sofia Sans Extra Condensed (polices variables, latin + latin étendu, 4 fichiers
+  woff2, 119 Ko), `fonts.css` (`font-display: swap`), `LISEZMOI.txt` (origine, licence SIL OFL 1.1).
+- `src/rlpi/fonts.py` : `font_css(embed=True)` intègre les polices en base64. Gabarit : repère `/*__FONTS__*/`
+  remplacé par `dashboard.py` et `models_page.py` → pages générées autonomes (+160 Ko), lisibles hors ligne et
+  copiées ailleurs. `meilleur_jeu.html` et `fantome.html` : lien `fonts/fonts.css`.
+- Pages existantes modifiées sur place (même remplacement qu'une régénération, données inchangées).
+  Vérifié : 0 requête Google, polices chargées, tableau de bord prêt en 0,4 s à froid.
+- Non modifié : `Design/rlpi-plateau/design/tokens.css` (kit de design) importe toujours Google Fonts.
+- Avant de pousser : `reports/` n'est pas versionné et l'image Docker ne copie que `config/` et `src/` → polices
+  déplacées dans `src/rlpi/assets/fonts/` (source de `rlpi.fonts`, copie locale gardée dans `reports/fonts` pour
+  les pages écrites à la main). `serve.py` (tableau de bord calculé à chaque demande sur le serveur) remplit
+  aussi le repère. Testé en local sur le serveur de production : page 200, 4 polices intégrées, 0 appel Google.
+
+## 2026-11-16 — Serveur : pré-calcul et cache disque des tableaux de bord
+
+- Mesure : un tableau de bord = 3,4 s de calcul (PC 16 cœurs ; 9 s au premier appel à froid), refait pour chaque
+  combinaison de filtres ; cache = dictionnaire en mémoire, sans limite, perdu à chaque redémarrage/déploiement.
+- `src/rlpi/pagecache.py` : cache mémoire (24 pages, LRU) + disque (gzip, 300 fichiers / 500 Mo, plus anciennes
+  supprimées d'abord), verrou par page (un seul calcul pour des demandes simultanées), clé = filtres + date des
+  données + empreinte du contenu du code (src/rlpi, gabarit, polices). Dossier : RLPI_PAGES_CACHE, sinon
+  <RLPI_USERS_CACHE>/pages (production : /app/cache/pages), sinon data/cache/pages.
+- `serve.py` : `dashboard_html()` partagé par les visiteurs et le pré-calcul ; fil « pré-calcul » qui calcule la
+  page par défaut de chaque profil au démarrage puis dès que `player_match_stats` change (vérifié toutes les 60 s).
+  Espace joueur (/moi) : même cache (pas de pré-calcul : dépend du compte connecté).
+- Test local : pré-calcul des 3 profils 10,5 s au démarrage → pages par défaut servies en 0,02 s ; page filtrée
+  2,6 s puis 0,008 s ; après redémarrage, tout sort du disque (0,014 s) ; 2 demandes simultanées = 1 calcul.
+- Pour survivre aux redéploiements, /app/cache doit être un volume persistant dans Coolify (sinon le pré-calcul
+  refait les pages par défaut après chaque déploiement, les pages filtrées repartent de zéro).

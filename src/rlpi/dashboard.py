@@ -17,6 +17,7 @@ import polars as pl
 
 from rlpi import config
 from rlpi.config import DATA, MODELS, ROOT, SOURCE
+from rlpi.fonts import PLACEHOLDER, font_css
 import numpy as np
 
 FEAT = DATA / "features"
@@ -991,6 +992,7 @@ def build(players: list[str], out: Path, since: str | None = None) -> Path:
     data = {"default": ids[0], "order": ids, "profiles": profiles}
     html = (Path(__file__).parent / "dashboard_template.html").read_text(encoding="utf-8")
     html = html.replace("/*__DATA__*/null", json.dumps(data, ensure_ascii=False))
+    html = html.replace(PLACEHOLDER, font_css(embed=True))      # polices intégrées : page autonome, sans réseau
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
     return out

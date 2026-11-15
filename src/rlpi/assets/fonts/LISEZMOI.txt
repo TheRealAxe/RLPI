@@ -1,0 +1,9 @@
+Polices utilisées par les pages RLPI (tableau de bord, modèles, meilleur jeu).
+
+- Sofia Sans et Sofia Sans Extra Condensed, de Lettersoup (Botio Nikoltchev, Ani Petrova).
+- Téléchargées le 16/11/2026 depuis Google Fonts (fonts.gstatic.com), sous-ensembles latin et latin étendu.
+- Licence : SIL Open Font License 1.1 (libre d'utilisation et de redistribution avec les pages).
+  https://openfontlicense.org
+
+Pourquoi en local : chargées depuis Google, elles bloquaient l'affichage des pages jusqu'à 5 s à la
+première ouverture. Ici, elles se chargent en quelques millisecondes et fonctionnent aussi sans Internet.

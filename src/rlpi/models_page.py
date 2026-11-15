@@ -16,6 +16,7 @@ import numpy as np
 import polars as pl
 
 from rlpi.config import FEATURES, FRAMES, MODELS, ROOT, SOURCE
+from rlpi.fonts import PLACEHOLDER, font_css
 
 TEMPLATE = Path(__file__).parent / "dashboard_template.html"
 OUT = ROOT / "reports" / "modeles.html"
@@ -36,7 +37,7 @@ def plateau_css() -> str:
     t = TEMPLATE.read_text(encoding="utf-8")
     a = t.index("/* ======================================================================\n   RLPI · Plateau")
     b = t.index("/* ======================================================================\n   Application")
-    return t[a:b]
+    return t[a:b].replace(PLACEHOLDER, font_css(embed=True))
 
 
 def goal_detection() -> dict:
