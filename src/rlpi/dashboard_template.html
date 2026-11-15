@@ -520,7 +520,7 @@ const TABS = ["ce-match", "ma-forme", "mon-jeu", "mon-trio"];
 function setupShell() {
   document.title = `${BASE.player} · RLPI`;
   $("#pname").textContent = BASE.player;
-  $("#who").innerHTML = ALL.order.map(id => `<option value="${id}"${id === SEL ? " selected" : ""}>${esc(ALL.profiles[id].player)}</option>`).join("");
+  $("#who").innerHTML = ALL.order.map(id => `<option value="${id}"${id === SEL ? " selected" : ""}>${esc((ALL.names || {})[id] || (ALL.profiles[id] || {}).player || id)}</option>`).join("");
   if (ALL.order.length < 2) $("#who-ctl").hidden = true;
   $("#who").addEventListener("change", e => { const u = new URL(location.href); u.searchParams.set("j", e.target.value); location.href = u.toString(); });
   $("#ref").innerHTML = ["ssl", "rlcs"].filter(k => BASE.refs[k]).map(k => `<option value="${k}">${BASE.refs[k].label}</option>`).join("");
