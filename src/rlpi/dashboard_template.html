@@ -127,6 +127,8 @@ h1, h2, h3, h4, p { margin: 0; font-weight: inherit; font-size: inherit; }
   padding: var(--space-1) var(--space-2); border-radius: 0; }
 .linkbtn { color: var(--ink); font-weight: 800; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule); }
 .linkbtn:hover { text-decoration-color: var(--ink); }
+.home { color: var(--ink-muted); text-decoration: none; }
+.home:hover, .home:focus-visible { color: var(--ink); }
 .ctx { display: flex; align-items: center; padding-left: var(--space-4); }
 header.pl-header { margin-bottom: var(--space-5); }
 
@@ -369,6 +371,7 @@ footer { margin-top: var(--space-12); }
       <button class="tab" role="tab" id="tab-mon-trio" aria-controls="view-mon-trio" data-tab="mon-trio"><span class="pl-cut pl-tag">Mon trio</span></button>
     </div>
     <div class="controls pl-small">
+      <a class="home" href="index.html" title="Retour à l'accueil">← Accueil</a>
       <label id="who-ctl">Joueur <select class="sel" id="who"></select></label>
       <label>Comparer à <select class="sel" id="ref"></select></label>
       <button class="linkbtn" id="method-open" data-m="indice" aria-haspopup="dialog">Méthode ⓘ</button>
