@@ -8,17 +8,31 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "data"
+load_dotenv(ROOT / ".env")
+
+# Dossier des données (par défaut data/ à la racine). RLPI_DATA permet de travailler dans un autre dossier,
+# par exemple un dossier temporaire par partie (rlpi.game) ; RLPI_MODELS garde alors les modèles partagés.
+DATA = Path(os.getenv("RLPI_DATA") or ROOT / "data")
 RAW = DATA / "raw"
 FRAMES = DATA / "frames"
 FEATURES = DATA / "features"
-MODELS = DATA / "models"
+MODELS = Path(os.getenv("RLPI_MODELS") or DATA / "models")
 CONFIG = ROOT / "config"
 
-# Décisions validées avec Théo (voir docs/JOURNAL.md)
+# Décisions validées (voir docs/JOURNAL.md)
 GAME_MODE = "ranked-standard"  # 3v3
 
-load_dotenv(ROOT / ".env")
+# Nom de la source des parties du joueur suivi : fichiers data/frames/<source>/ et data/features/*_<source>.*
+# « theo » pour les données de Théo (tableau de bord en ligne) ; le kit partagé utilise « perso ».
+SOURCE = os.getenv("RLPI_SOURCE", "theo").strip() or "theo"
+
+# Profil suivi (voir .env.example) : identifiant du joueur et coéquipiers à comparer.
+# Source « theo » sans réglage : profil de Théo et ses coéquipiers habituels (comportement d'avant la
+# généralisation). Pour toute autre source, vide par défaut (détecté par l'application).
+_THEO = SOURCE == "theo"
+PLAYER = os.getenv("RLPI_PLAYER", "").strip() or ("Steam:76561198078330309" if _THEO else "")
+COMPARE = [s.strip() for s in (os.getenv("RLPI_COMPARE", "").strip() or ("LAinox,Rileq" if _THEO else "")).split(",")
+           if s.strip()]
 
 
 def ballchasing_token() -> str:

@@ -5,15 +5,15 @@ Plus fin que les 5 actions de `decisions` : on apprend sur les touches RLCS
   - Q(situation, direction) : gain de valeur ΔV (même cible que `decisions`) pour une balle envoyée
     dans cette direction (la force n'est pas modélisée : elle dépend trop de l'issue).
 Meilleur jeu = argmax de Q parmi les directions que les pros jouent au moins 10 % du temps (+ celle jouée).
-Les positions idéales des coéquipiers viennent du modèle de placement (`placement_theo.parquet`).
+Les positions idéales des coéquipiers viennent du modèle de placement (`placement_<source>.parquet`).
 
 Tout est dans le repère du toucheur (il attaque vers +y). Angle 90° = droit vers le but adverse.
 
 Usage :
     python -m rlpi.bestplay extract --source rlcs     # long : toutes les touches RLCS
-    python -m rlpi.bestplay extract --source theo
+    python -m rlpi.bestplay extract --source perso
     python -m rlpi.bestplay train
-    python -m rlpi.bestplay export --player Axe --since 2026-11-14 [--rank 0]
+    python -m rlpi.bestplay export --player <pseudo ou identifiant> --since 2026-11-14 [--rank 0]
 """
 from __future__ import annotations
 
@@ -24,7 +24,9 @@ import math
 import numpy as np
 import polars as pl
 
-from rlpi.config import FEATURES, FRAMES, MODELS
+import os
+
+from rlpi.config import FEATURES, FRAMES, MODELS, SOURCE
 from rlpi.decisions import ACTION_FR, TARGET, TOUCHER
 from rlpi.value import FEATURE_NAMES, features, labels_and_score, load_replay
 
@@ -350,11 +352,11 @@ def _track(f, m, i, slot, team, place: pl.DataFrame) -> dict:
 def export(player: str, since: str, rank: int, out: str, at: str = "", dates: list[str] | None = None) -> dict:
     import lightgbm as lgb
 
-    X = np.load(FEATURES / "bestplay_X_theo.npy")
-    R = pl.read_parquet(FEATURES / "bestplay_rows_theo.parquet").with_row_index("k")
-    dec = pl.read_parquet(FEATURES / "touch_decisions_theo.parquet").select("replay", "i", "player_id", "date", "t_s")
+    X = np.load(FEATURES / f"bestplay_X_{SOURCE}.npy")
+    R = pl.read_parquet(FEATURES / f"bestplay_rows_{SOURCE}.parquet").with_row_index("k")
+    dec = pl.read_parquet(FEATURES / f"touch_decisions_{SOURCE}.parquet").select("replay", "i", "player_id", "date", "t_s")
     R = R.join(dec, on=["replay", "i", "player_id"], how="inner").filter(
-        (pl.col("player_name") == player) & (pl.col("date").is_in(dates) if dates else pl.col("date") >= since))
+        ((pl.col("player_name") == player) | (pl.col("player_id") == player)) & (pl.col("date").is_in(dates) if dates else pl.col("date") >= since))
     pm = lgb.Booster(model_file=str(MODELS / "bestplay_policy.txt"))
     qm = lgb.Booster(model_file=str(MODELS / "bestplay_q.txt"))
 
@@ -389,10 +391,10 @@ def export(player: str, since: str, rank: int, out: str, at: str = "", dates: li
         hit = np.where((R["date"].to_numpy() == date) & (np.abs(R["t_s"].to_numpy() - float(ts)) < 0.05))[0]
         t = int(hit[0])
     row = R.row(int(t), named=True)
-    m, f = load_replay(FRAMES / "theo" / f"{row['replay']}.meta.json")
+    m, f = load_replay(FRAMES / SOURCE / f"{row['replay']}.meta.json")
     slot = next(p["slot"] for p in m["players"] if p["id"] == row["player_id"])
     team = row["team"]
-    place = pl.read_parquet(FEATURES / "placement_theo.parquet").filter(
+    place = pl.read_parquet(FEATURES / f"placement_{SOURCE}.parquet").filter(
         (pl.col("replay") == row["replay"]) & (pl.col("team") == team))
 
     k_best = int(np.argmax(qbest_sec[t]))
@@ -432,7 +434,7 @@ def worst(player: str, n_games: int, k: int, outdir: str = "reports") -> None:
     dans la même partie (une seule touche par action)."""
     import os
 
-    dec = pl.read_parquet(FEATURES / "touch_decisions_theo.parquet").filter(pl.col("player_name") == player)
+    dec = pl.read_parquet(FEATURES / f"touch_decisions_{SOURCE}.parquet").filter((pl.col("player_name") == player) | (pl.col("player_id") == player))
     dates = sorted(dec["date"].unique().to_list(), reverse=True)[:n_games]
     tmp = os.path.join(outdir, "_bestplay_tmp.js")
     kept, rank, n_dup, n_duel = [], 0, 0, 0
@@ -480,7 +482,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["extract", "train", "export", "worst"])
     ap.add_argument("--source", default="rlcs")
-    ap.add_argument("--player", default="Axe")
+    ap.add_argument("--player", default=os.getenv("RLPI_PLAYER", ""))
     ap.add_argument("--since", default="2026-11-14")
     ap.add_argument("--rank", type=int, default=0)
     ap.add_argument("--at", default="", help="moment précis : \"AAAA-MM-JJ HH-MM-SS@t_s\"")

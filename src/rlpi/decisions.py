@@ -12,7 +12,7 @@
    à partir de la balle, des coéquipiers et des adversaires. Écart = distance réelle ↔ prédite.
 
 Les scores RLCS sont calculés « hors échantillon » (validation croisée par match, 5 plis) pour être
-comparables à ceux de Théo, que le modèle n'a jamais vus.
+comparables à ceux de l'utilisateur, que le modèle n'a jamais vus.
 
 Usage :
     python -m rlpi.decisions touches
@@ -26,7 +26,7 @@ import json
 import numpy as np
 import polars as pl
 
-from rlpi.config import FEATURES, FRAMES, MODELS
+from rlpi.config import FEATURES, FRAMES, MODELS, SOURCE
 from rlpi.value import FEATURE_NAMES, features, labels_and_score, load_replay
 
 # Actions définies par l'INTENTION (direction donnée à la balle), pas par la réussite :
@@ -119,10 +119,10 @@ def _score(df, pol, q, acts):
 
 
 def touches(retrain: bool = True) -> None:
-    """retrain=False : note seulement les touches de Théo avec les modèles enregistrés (RLCS inchangé)."""
+    """retrain=False : note seulement les touches de l'utilisateur avec les modèles enregistrés (RLCS inchangé)."""
     import lightgbm as lgb
 
-    Xt, tt = touch_table("theo")
+    Xt, tt = touch_table(SOURCE)
     if not retrain:
         pm = lgb.Booster(model_file=str(MODELS / "policy_touch.txt"))
         qm = lgb.Booster(model_file=str(MODELS / "q_touch.txt"))
@@ -130,8 +130,8 @@ def touches(retrain: bool = True) -> None:
         yt_a = tt["act"].replace_strict(a_idx).to_numpy()
         oh = lambda X, k: np.hstack([X, np.eye(len(ACTIONS), dtype=np.float32)[np.full(len(X), k)]])  # noqa: E731
         q_t = np.column_stack([qm.predict(oh(Xt, k)) for k in range(len(ACTIONS))])
-        _score(tt, pm.predict(Xt), q_t, yt_a).write_parquet(FEATURES / "touch_decisions_theo.parquet")
-        print(f"→ touch_decisions_theo.parquet : {tt.height:,} touches notées (modèles existants)")
+        _score(tt, pm.predict(Xt), q_t, yt_a).write_parquet(FEATURES / f"touch_decisions_{SOURCE}.parquet")
+        print(f"→ touch_decisions_{SOURCE}.parquet : {tt.height:,} touches notées (modèles existants)")
         return
     Xr, tr = touch_table("rlcs")
     names = FEATURE_NAMES + TOUCHER
@@ -182,7 +182,7 @@ def touches(retrain: bool = True) -> None:
     print(f"Q(s,a) : R² hors échantillon {r2:.3f} (moyenne par action seule : {r2_base:.3f}) ; "
           f"policy : bonne action prédite {acc:.0%} (classe majoritaire {np.mean(yr_a == np.bincount(yr_a).argmax()):.0%})")
 
-    # Modèles finaux → Théo
+    # Modèles finaux → l'utilisateur
     pm = lgb.train(pol_params, lgb.Dataset(Xr, yr_a, feature_name=names), int(np.mean(p_rounds)))
     qm = lgb.train(q_params, lgb.Dataset(onehot_X(Xr, yr_a), yr_dv, feature_name=q_names), int(np.mean(q_rounds)))
     pm.save_model(str(MODELS / "policy_touch.txt")); qm.save_model(str(MODELS / "q_touch.txt"))
@@ -190,11 +190,11 @@ def touches(retrain: bool = True) -> None:
     pol_t, q_t = pm.predict(Xt), all_q(qm, Xt)
 
     _score(tr, pol_oof, q_oof, yr_a).write_parquet(FEATURES / "touch_decisions_rlcs.parquet")
-    _score(tt, pol_t, q_t, yt_a).write_parquet(FEATURES / "touch_decisions_theo.parquet")
+    _score(tt, pol_t, q_t, yt_a).write_parquet(FEATURES / f"touch_decisions_{SOURCE}.parquet")
     (MODELS / "q_touch_report.json").write_text(json.dumps(
         {"r2_oof": r2, "r2_action_mean": r2_base, "policy_acc": acc, "n": int(len(Xr)),
          "n_matches": int(len(np.unique(groups)))}, indent=1), encoding="utf-8")
-    print("→ touch_decisions_{rlcs,theo}.parquet")
+    print("→ touch_decisions_{rlcs,perso}.parquet")
 
 
 # --------------------------------------------------------------------------- placement
@@ -247,7 +247,7 @@ def placement() -> None:
     import lightgbm as lgb
 
     Xr, Yr, mr = placement_rows("rlcs", step=5)
-    Xt, Yt, mt = placement_rows("theo", step=5)
+    Xt, Yt, mt = placement_rows(SOURCE, step=5)
     groups = mr["replay"].to_numpy()
     folds = _folds(groups)
     params = dict(objective="regression_l1", learning_rate=0.05, num_leaves=63, min_data_in_leaf=200,
@@ -272,15 +272,15 @@ def placement() -> None:
         mdl.save_model(str(MODELS / f"placement_{'xy'[j]}.txt"))
         pt[:, j] = mdl.predict(Xt)
     err_t = np.hypot(*(pt - Yt).T)
-    for df, err, pr, yy, src in ((mr, err_r, pred, Yr, "rlcs"), (mt, err_t, pt, Yt, "theo")):
+    for df, err, pr, yy, src in ((mr, err_r, pred, Yr, "rlcs"), (mt, err_t, pt, Yt, SOURCE)):
         df.with_columns(pl.Series("err", err), pl.Series("x", yy[:, 0]), pl.Series("y", yy[:, 1]),
                         pl.Series("px", pr[:, 0]), pl.Series("py", pr[:, 1])) \
           .write_parquet(FEATURES / f"placement_{src}.parquet")
-    print(f"→ placement_{{rlcs,theo}}.parquet ; écart médian Théo et lobbies {np.median(err_t):.0f} uu")
+    print(f"→ placement_{{rlcs,perso}}.parquet ; écart médian l'utilisateur et lobbies {np.median(err_t):.0f} uu")
 
 
-def placement_score(source: str = "theo") -> None:
-    """Note le placement d'une source (theo, ssl…) avec les modèles déjà entraînés sur RLCS (sans réentraîner)."""
+def placement_score(source: str = SOURCE) -> None:
+    """Note le placement d'une source (perso, ssl…) avec les modèles déjà entraînés sur RLCS (sans réentraîner)."""
     import lightgbm as lgb
 
     Xt, Yt, mt = placement_rows(source, step=5)
@@ -291,21 +291,21 @@ def placement_score(source: str = "theo") -> None:
     print(f"→ placement_{source}.parquet ({mt['replay'].n_unique()} matchs)")
 
 
-def placement_score_theo() -> None:
-    placement_score("theo")
+def placement_score_perso() -> None:
+    placement_score(SOURCE)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["touches", "touches-theo", "placement", "placement-theo", "placement-score"])
-    ap.add_argument("--source", default="theo")
+    ap.add_argument("cmd", choices=["touches", "touches-perso", "touches-theo", "placement", "placement-perso", "placement-score"])
+    ap.add_argument("--source", default=SOURCE)
     a = ap.parse_args()
-    if a.cmd == "touches-theo":
+    if a.cmd in ("touches-perso", "touches-theo"):  # même commande : touches de la source suivie (SOURCE)
         touches(retrain=False)
     elif a.cmd == "placement-score":
         placement_score(a.source)
     else:
-        {"touches": touches, "placement": placement, "placement-theo": placement_score_theo}[a.cmd]()
+        {"touches": touches, "placement": placement, "placement-perso": placement_score_perso}[a.cmd]()
 
 
 if __name__ == "__main__":

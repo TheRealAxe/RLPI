@@ -27,8 +27,9 @@ Fiabilité (rapport data/models/perf_report.json)
 - test-retest RLCS : même joueur, matchs pairs vs impairs → nombre de matchs pour une moyenne fiable (≥ 0,8) ;
 - moitiés de match (`python -m rlpi.perf fiabilite`) : minutes paires vs impaires d'un même match.
 
-Usage : python -m rlpi.perf [fiabilite]  → data/features/perf_{ssl,theo}.parquet + data/models/perf_report.json
-Prérequis : python -m rlpi.value goals --source {ssl,rlcs,theo}
+Usage : python -m rlpi.perf [fiabilite]  → data/features/perf_{ssl,<source>}.parquet + data/models/perf_report.json
+        python -m rlpi.perf score --source <source>  → note une source avec la référence data/models/perf_reference.npz
+Prérequis : python -m rlpi.value goals --source {ssl,rlcs,perso}
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from rlpi.config import FEATURES, FRAMES, MODELS
+from rlpi.config import FEATURES, FRAMES, MODELS, SOURCE
 
 COMPONENTS = [
     # (clé, libellé, sens)
@@ -138,6 +139,44 @@ def test_retest(df: pl.DataFrame, col: str, min_n: int = 10) -> dict:
             "matches_for_08": int(np.ceil(0.8 * (1 - single) / (0.2 * single))) if single > 0 else None}
 
 
+REFERENCE = MODELS / "perf_reference.npz"
+PERF_COLS = ["replay", "date", "player_id", "player_name", "team", "won", "play_s", "index", "prod", "fond",
+             *KEYS, *[f"c_{k}" for k in KEYS]]
+
+
+def _score(df: pl.DataFrame, X: np.ndarray, ref: dict) -> pl.DataFrame:
+    """Indice, sous-notes et centiles par composante, à partir de la référence SSL (voir fit_and_score)."""
+    fi = [KEYS.index(k) for k in FOND]
+    pct = lambda s, ref_sorted: 100 * np.searchsorted(ref_sorted, s, side="right") / len(ref_sorted)  # noqa: E731
+    cs = ref["comp_sorted"]  # chaque composante SSL triée (centile de chaque composante face aux SSL)
+    cp = np.column_stack([100 * np.searchsorted(cs[:, j], X[:, j], side="right") / len(cs) for j in range(len(KEYS))])
+    return df.with_columns(pl.Series("index", pct(X @ ref["w"], ref["srt"])),
+                           pl.Series("fond", pct(X[:, fi] @ ref["w_f"], ref["srt_f"])),
+                           pl.Series("prod", cp[:, 0]),
+                           *[pl.Series(f"c_{k}", cp[:, j]) for j, k in enumerate(KEYS)])
+
+
+def load_reference() -> dict:
+    z = np.load(REFERENCE)
+    return {"mu": dict(zip(KEYS, z["mu"].tolist())), "sd": dict(zip(KEYS, z["sd"].tolist())),
+            **{k: z[k] for k in ("w", "w_f", "srt", "srt_f", "comp_sorted")}}
+
+
+def score_source(source: str) -> pl.DataFrame | None:
+    """Note les joueurs-matchs d'une source avec la référence enregistrée, sans réapprendre les poids.
+
+    Même résultat que fit_and_score pour cette source (référence SSL figée dans perf_reference.npz).
+    Sert au traitement partie par partie (rlpi.game). Retourne None s'il n'y a aucun joueur-match notable.
+    """
+    ref = load_reference()
+    df = player_matches(source)
+    if df.is_empty():
+        return None
+    out = _score(df, _z(df, ref["mu"], ref["sd"]), ref).select(PERF_COLS)
+    out.write_parquet(FEATURES / f"perf_{source}.parquet")
+    return out
+
+
 def fit_and_score() -> dict:
     from sklearn.metrics import roc_auc_score
 
@@ -161,26 +200,20 @@ def fit_and_score() -> dict:
     w_f, _ = _weights(Xr[:, fi], yr)
     auc_player = float(roc_auc_score(yr, oof))
 
-    srt = np.sort(Xr @ w)
-    srt_f = np.sort(Xr[:, fi] @ w_f)
-    pct = lambda s, ref_sorted: 100 * np.searchsorted(ref_sorted, s, side="right") / len(ref_sorted)  # noqa: E731
-
-    def comp_pct(X: np.ndarray) -> np.ndarray:  # centile de chaque composante face aux SSL
-        return np.column_stack([100 * np.searchsorted(np.sort(Xr[:, j]), X[:, j], side="right") / len(Xr)
-                                for j in range(len(KEYS))])
+    # Référence figée : réutilisée telle quelle pour noter une partie isolée (score_source)
+    refd = {"mu": mu, "sd": sd, "w": w, "w_f": w_f, "srt": np.sort(Xr @ w), "srt_f": np.sort(Xr[:, fi] @ w_f),
+            "comp_sorted": np.sort(Xr, axis=0)}
+    np.savez(REFERENCE, mu=np.array([mu[k] for k in KEYS]), sd=np.array([sd[k] for k in KEYS]),
+             **{k: refd[k] for k in ("w", "w_f", "srt", "srt_f", "comp_sorted")})
 
     ref = ref.with_columns(pl.Series("oof", oof))
     out = {}
-    for src in ("ssl", "theo", "rlcs"):
+    for src in ("ssl", SOURCE, "rlcs"):
         df = ref if src == "ssl" else player_matches(src)
         X = Xr if src == "ssl" else _z(df, mu, sd)
-        cp = comp_pct(X)
-        df = df.with_columns(pl.Series("index", pct(X @ w, srt)), pl.Series("fond", pct(X[:, fi] @ w_f, srt_f)),
-                             pl.Series("prod", cp[:, 0]),
-                             *[pl.Series(f"c_{k}", cp[:, j]) for j, k in enumerate(KEYS)])
+        df = _score(df, X, refd)
         if src != "rlcs":
-            df.select("replay", "date", "player_id", "player_name", "team", "won", "play_s", "index", "prod", "fond",
-                      *KEYS, *[f"c_{k}" for k in KEYS]).write_parquet(FEATURES / f"perf_{src}.parquet")
+            df.select(PERF_COLS).write_parquet(FEATURES / f"perf_{src}.parquet")
         out[src] = df
 
     rl = out["rlcs"]
@@ -192,7 +225,7 @@ def fit_and_score() -> dict:
         "auc_player_oof": auc_player, "team_acc_oof": team_acc(ref, "oof"),
         "rlcs_team_acc": team_acc(rl, "index"), "rlcs_team_acc_prod": team_acc(rl, "prod"),
         "rlcs_team_acc_fond": team_acc(rl, "fond"), "rlcs_n_matches": rl["replay"].n_unique(),
-        "theo_team_acc": team_acc(out["theo"], "index"), "theo_n_matches": out["theo"]["replay"].n_unique(),
+        "perso_team_acc": team_acc(out[SOURCE], "index"), "perso_n_matches": out[SOURCE]["replay"].n_unique(),
         "retest": {c: test_retest(rl, c) for c in ("index", "prod", "fond")},
         "median": mu, "sd": sd,
     }
@@ -261,11 +294,16 @@ def split_half(source: str = "ssl") -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", nargs="?", default="fit", choices=["fit", "fiabilite"])
+    ap.add_argument("cmd", nargs="?", default="fit", choices=["fit", "fiabilite", "score"])
+    ap.add_argument("--source", default=SOURCE, help="source à noter avec « score » (référence déjà enregistrée)")
     a = ap.parse_args()
     if a.cmd == "fiabilite":
         r = split_half("ssl")
         print("Fiabilité d'un match (moitiés paires / impaires, SSL) :", {k: round(v, 2) if isinstance(v, float) else v for k, v in r.items()})
+        return
+    if a.cmd == "score":
+        df = score_source(a.source)
+        print(f"→ perf_{a.source}.parquet : {0 if df is None else df.height} joueurs-matchs notés (référence enregistrée)")
         return
     r = fit_and_score()
     print(f"Référence : {r['n_ref_player_matches']} joueurs-matchs SSL ({r['n_ref_matches']} parties)")
@@ -274,7 +312,7 @@ def main() -> None:
     print(f"AUC joueur (victoire, hors échantillon SSL) : {r['auc_player_oof']:.3f} ; équipe gagnante SSL {r['team_acc_oof']:.1%}")
     print(f"RLCS (jamais vu) : équipe gagnante {r['rlcs_team_acc']:.1%} (production {r['rlcs_team_acc_prod']:.1%}, "
           f"fondamentaux {r['rlcs_team_acc_fond']:.1%}) sur {r['rlcs_n_matches']} matchs")
-    print(f"Parties de Théo : {r['theo_team_acc']:.1%} sur {r['theo_n_matches']}")
+    print(f"Tes parties : {r['perso_team_acc']:.1%} sur {r['perso_n_matches']}")
     for c, v in r["retest"].items():
         print(f"  test-retest RLCS {c:<6} fiabilité 1 match {v['reliability_1']:.2f} · matchs pour 0,8 : {v['matches_for_08']}")
 

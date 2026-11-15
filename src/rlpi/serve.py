@@ -5,7 +5,7 @@
 - Sert le dossier reports/ (page d'accueil, swipe, archives…).
 - /tableau_de_bord.html est calculé à chaque demande selon l'adresse :
     ?j=<id du joueur affiché>&du=AAAA-MM-JJ&au=AAAA-MM-JJ&avec=<id>,<id>&sans=<id>
-  (sans paramètre : profil d'Axe, parties à partir de --since). Environ 2 s par nouvelle combinaison,
+  (sans paramètre : profil RLPI_PLAYER du .env, parties à partir de --since). Environ 2 s par nouvelle combinaison,
   puis mise en cache tant que les données ne changent pas.
 - N'écoute que sur 127.0.0.1 par défaut.
 - /health répond « ok » (contrôle de santé du conteneur).
@@ -24,13 +24,14 @@ from urllib.parse import parse_qs, urlparse
 
 import polars as pl
 
-from rlpi.config import ROOT
+from rlpi import config
+from rlpi.config import ROOT, SOURCE
 from rlpi.dashboard import FEAT, make_payload
 
 REPORTS = Path(os.getenv("RLPI_REPORTS") or ROOT / "reports")
 TEMPLATE = Path(__file__).parent / "dashboard_template.html"
-PLAYERS = ["Steam:76561198078330309", "LAinox", "Rileq"]  # profils proposés (le premier par défaut)
-STATS = FEAT / "player_match_stats_theo.parquet"
+PLAYERS = [p for p in [config.PLAYER, *config.COMPARE] if p]  # profils proposés (le premier par défaut), réglés dans .env
+STATS = FEAT / f"player_match_stats_{SOURCE}.parquet"
 
 
 def roster() -> tuple[list[str], dict[str, str], list[dict]]:

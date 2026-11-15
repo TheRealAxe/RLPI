@@ -404,7 +404,7 @@ const ALL = /*__DATA__*/null;
 if (!ALL) {
   document.querySelector("#main").innerHTML = `<div class="pl-panel pl-cutr carton"><h2 class="pl-dx pl-title">Gabarit sans données</h2>
     <p class="pl-small" style="margin-top:8px">La page se trouve dans <b>reports/tableau_de_bord.html</b>. Pour la régénérer :<br>
-    <code>.venv/Scripts/python -m rlpi.dashboard --player "Steam:76561198078330309" --compare LAinox Rileq</code></p></div>`;
+    <code>.venv/Scripts/python -m rlpi.dashboard --player "Steam:&lt;ton identifiant&gt;" --compare Pseudo1 Pseudo2</code></p></div>`;
   throw new Error("gabarit sans données");
 }
 const SEL = (() => { const q = new URLSearchParams(location.search).get("j"); return q && ALL.profiles[q] ? q : ALL.default; })();
@@ -1230,7 +1230,7 @@ function glossary() {
       read: ["Au-dessus de 55 : bien joué dans cette partie ; 45–55 : correct ; en dessous de 45 : tu as moins pesé que les autres.",
         PF ? `Pourquoi ce n'est pas un niveau : les autres joueurs de tes parties obtiennent ${Math.round(PF.lobby.mean)} en moyenne, presque comme des SSL entre eux. L'impact de tes touches (la moitié de la note) est plus facile à obtenir face à des adversaires plus faibles. Ton niveau technique est mesuré à part (Mon jeu › Tous les indicateurs › Technique).` : "",
         "Dans Ce match, la note décomposée montre quelle composante a fait monter ou baisser la note ce jour-là. Le classement de la partie compare ton indice à celui des 5 autres joueurs, calculé de la même façon.",
-        val ? `Validité vérifiée : l'équipe dont l'indice moyen est le plus haut gagne ${Math.round(val.team_acc_oof * 100)} % des parties SSL (validation croisée)${val.rlcs_team_acc ? `, ${Math.round(val.rlcs_team_acc * 100)} % de ${val.rlcs_n_matches} matchs RLCS jamais vus` : ""} et ${Math.round(val.theo_team_acc * 100)} % de tes ${val.theo_n_matches} parties.` : "",
+        val ? `Validité vérifiée : l'équipe dont l'indice moyen est le plus haut gagne ${Math.round(val.team_acc_oof * 100)} % des parties SSL (validation croisée)${val.rlcs_team_acc ? `, ${Math.round(val.rlcs_team_acc * 100)} % de ${val.rlcs_n_matches} matchs RLCS jamais vus` : ""} et ${Math.round(val.perso_team_acc * 100)} % de tes ${val.perso_n_matches} parties.` : "",
         val?.retest ? `<b>Fiabilité</b> : une note de match bouge beaucoup d'une partie à l'autre, même pour un pro. Il faut environ <b>${val.retest.index.matches_for_08} parties</b> pour que ta moyenne soit stable (fiabilité 0,8) ; pour les fondamentaux, <b>${val.retest.fond.matches_for_08}</b> suffisent, pour la production il en faudrait ${val.retest.prod.matches_for_08}. Une note de match raconte ce qui s'est passé ; pour juger ta progression, regarde des moyennes.` : ""],
       limits: ["L'impact des touches pèse environ la moitié de la note et c'est la partie la plus volatile : quelques grosses touches font la note d'un match.", "Les poids reflètent ce qui fait gagner en SSL, pas forcément ce qui fait progresser.", "Ne voit pas la communication, le mental ni les feintes : seulement ce qui se mesure dans le replay."] },
     { id: "valeur", title: "Valeur de la situation",

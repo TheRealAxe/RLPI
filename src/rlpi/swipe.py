@@ -4,7 +4,7 @@ Chaque carte = une touche d'un joueur, 3 s avant et 1 s après (la suite est cac
 décision, pas le résultat). Positions, orientation (vecteurs avant / haut), vitesses et boost des
 6 voitures et de la balle, à 30 images par seconde (fréquence d'enregistrement du replay).
 
-Tirage stratifié par origine du joueur jugé (cachée à l'écran) : Théo, ses coéquipiers suivis,
+Tirage stratifié par origine du joueur jugé (cachée à l'écran) : l'utilisateur, ses coéquipiers suivis,
 les autres joueurs de ses parties, SSL, RLCS.
 
 Usage : python -m rlpi.swipe --n 40  → reports/swipe/deck.json
@@ -18,22 +18,23 @@ import random
 import numpy as np
 import polars as pl
 
-from rlpi.config import FEATURES, FRAMES, ROOT
+from rlpi import config
+from rlpi.config import FEATURES, FRAMES, ROOT, SOURCE
 
 FPS = 30        # images par seconde du clip livré
 SRC_FPS = 120   # lecture fine du replay pour dater chaque vraie mise à jour
 BEFORE, AFTER = 3.0, 1.0
-THEO = "Steam:76561198078330309"
-PEERS = {"LAinox", "Rileq"}
-MIX = {"theo": .4, "peer": .15, "lobby": .15, "ssl": .15, "rlcs": .15}
+PERSO = config.PLAYER
+PEERS = set(config.COMPARE)
+MIX = {"perso": .4, "peer": .15, "lobby": .15, "ssl": .15, "rlcs": .15}
 
 
 def candidates() -> pl.DataFrame:
     rows = []
-    for src in ("theo", "ssl", "rlcs"):
+    for src in (SOURCE, "ssl", "rlcs"):
         t = pl.read_parquet(FEATURES / f"touch_values_{src}.parquet").select("replay", "i", "player_id", "player_name", "action")
-        if src == "theo":
-            t = t.with_columns(pl.when(pl.col("player_id") == THEO).then(pl.lit("theo"))
+        if src == SOURCE:
+            t = t.with_columns(pl.when(pl.col("player_id") == PERSO).then(pl.lit("perso"))
                                .when(pl.col("player_name").is_in(list(PEERS))).then(pl.lit("peer"))
                                .otherwise(pl.lit("lobby")).alias("origin"))
         else:

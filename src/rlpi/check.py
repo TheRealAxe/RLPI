@@ -38,7 +38,7 @@ def check_api() -> bool:
     try:
         api = config.ballchasing_api()
         info = api.ping()
-    except Exception as exc:  # noqa: BLE001 — message lisible pour Théo
+    except Exception as exc:  # noqa: BLE001 — message lisible pour l'utilisateur
         print(f"API ballchasing : ÉCHEC ({exc})")
         return False
     print(f"API ballchasing OK (compte : {info.get('name', '?')}, "

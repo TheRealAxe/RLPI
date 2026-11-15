@@ -1,8 +1,8 @@
 """Tableau de bord : critères automatiques d'un joueur comparés à ses lobbies, SSL et RLCS.
 
 Usage :
-    python -m rlpi.dashboard --player "Steam:76561198078330309"
-Entrées : data/features/player_match_stats_{theo,rlcs}.parquet (voir rlpi.stats)
+    python -m rlpi.dashboard --player "Steam:<ton identifiant>"
+Entrées : data/features/player_match_stats_{perso,rlcs}.parquet (voir rlpi.stats)
 Sortie  : reports/tableau_de_bord.html (page autonome, à ouvrir dans un navigateur)
 """
 from __future__ import annotations
@@ -15,7 +15,8 @@ from pathlib import Path
 
 import polars as pl
 
-from rlpi.config import DATA, MODELS, ROOT
+from rlpi import config
+from rlpi.config import DATA, MODELS, ROOT, SOURCE
 import numpy as np
 
 FEAT = DATA / "features"
@@ -181,7 +182,7 @@ ACTION_FR = {"shot": "Tirs", "save": "Arrêts", "clear": "Dégagements", "pass":
              "boom": "Frappes fortes", None: "Contrôles / autres"}
 
 
-# Mesuré le 12/11/2026 : dans les parties classées de Théo, 1,5× plus de buts que prévu par le modèle
+# Mesuré le 12/11/2026 : dans les parties classées de l'utilisateur, 1,5× plus de buts que prévu par le modèle
 # appris sur RLCS (taux 4,9 % vs 3,3 % à 5 s) → les touches vers le but y « rapportent » plus.
 RANKED_GOAL_RATIO = 1.5
 
@@ -202,12 +203,12 @@ def play_seconds(source: str) -> dict[str, float]:
 
 def value_section(player: str, my_replays: list[str]) -> dict | None:
     """Valeur ajoutée par les touches (modèle de valeur v1, horizon 5 s)."""
-    ft, fr_ = FEAT / "touch_values_theo.parquet", FEAT / "touch_values_rlcs.parquet"
+    ft, fr_ = FEAT / f"touch_values_{SOURCE}.parquet", FEAT / "touch_values_rlcs.parquet"
     if not ft.exists() or not fr_.exists():
         return None
     rl = pl.read_parquet(fr_)
     me = pl.read_parquet(ft).filter((pl.col("player_id") == player) & pl.col("replay").is_in(my_replays))
-    sec_r, sec_t = play_seconds("rlcs"), play_seconds("theo")
+    sec_r, sec_t = play_seconds("rlcs"), play_seconds(SOURCE)
 
     def per_match(df, secs):
         return (df.group_by("replay", "player_id", "player_name").agg(
@@ -225,13 +226,13 @@ def value_section(player: str, my_replays: list[str]) -> dict | None:
 
     # Placement hors ballon : écart médian à la position « pro » prédite (plus petit = plus pro)
     from rlpi.config import FRAMES
-    slot_of = {r: {p["id"]: p["slot"] for p in json.loads((FRAMES / "theo" / f"{r}.meta.json")
+    slot_of = {r: {p["id"]: p["slot"] for p in json.loads((FRAMES / SOURCE / f"{r}.meta.json")
                    .read_text(encoding="utf-8"))["players"]} for r in my_replays}
     plc = {}
     if (FEAT / "placement_rlcs.parquet").exists():
         pr = pl.read_parquet(FEAT / "placement_rlcs.parquet").group_by("replay", "slot").agg(
             pl.col("err").median(), pl.len())
-        pt = pl.read_parquet(FEAT / "placement_theo.parquet").filter(pl.col("replay").is_in(my_replays)) \
+        pt = pl.read_parquet(FEAT / f"placement_{SOURCE}.parquet").filter(pl.col("replay").is_in(my_replays)) \
             .group_by("replay", "slot").agg(pl.col("err").median(), pl.len())
         ref_err = pr["err"].to_list()
         for r, slot, err, n in pt.iter_rows():
@@ -249,7 +250,7 @@ def value_section(player: str, my_replays: list[str]) -> dict | None:
     if (FEAT / "touch_decisions_rlcs.parquet").exists():
         dr = pl.read_parquet(FEAT / "touch_decisions_rlcs.parquet").group_by("replay", "player_id") \
             .agg(pl.col("regret").mean(), (pl.col("p_pro")).mean().alias("ppro"))
-        dt = pl.read_parquet(FEAT / "touch_decisions_theo.parquet").filter(pl.col("replay").is_in(my_replays)) \
+        dt = pl.read_parquet(FEAT / f"touch_decisions_{SOURCE}.parquet").filter(pl.col("replay").is_in(my_replays)) \
             .group_by("replay", "player_id").agg(pl.col("regret").mean(), (pl.col("p_pro")).mean().alias("ppro"))
         ref_reg = dr["regret"].to_list()
         for r, pid, reg, ppro in dt.iter_rows():
@@ -287,14 +288,14 @@ def value_section(player: str, my_replays: list[str]) -> dict | None:
                  "kind": r["kind"], "role": r["role"], "dv": r["dv"], "vb": r["v_before"], "va": r["v_after"],
                  "x": r["ball_x"], "y": r["ball_y"]} for r in df.iter_rows(named=True)]
 
-    # Courbes de valeur de chaque match, du point de vue de l'équipe de Théo
-    curves = {c["replay"]: c for c in json.loads((FEAT / "value_curves_theo.json").read_text(encoding="utf-8"))}
+    # Courbes de valeur de chaque match, du point de vue de l'équipe de l'utilisateur
+    curves = {c["replay"]: c for c in json.loads((FEAT / f"value_curves_{SOURCE}.json").read_text(encoding="utf-8"))}
     from rlpi.config import FRAMES
     match_curves = {}
     for r in my_replays:
         if r not in curves:
             continue
-        meta = json.loads((FRAMES / "theo" / f"{r}.meta.json").read_text(encoding="utf-8"))
+        meta = json.loads((FRAMES / SOURCE / f"{r}.meta.json").read_text(encoding="utf-8"))
         team = next(p["team"] for p in meta["players"] if p["id"] == player)
         c = curves[r]
         v = [None if not pl_ else (x if team == 0 else -x) for x, pl_ in zip(c["v_team0"], c["play"])]
@@ -375,12 +376,12 @@ def peer_section(player: str, me: pl.DataFrame, peers: dict[str, pl.DataFrame]) 
 
 def passes_section(player: str, my_replays: list[str], peers: dict[str, pl.DataFrame]) -> dict | None:
     """Balles données (vers l'avant / le côté / l'arrière) : récupérées par un coéquipier ou perdues."""
-    ft, fr_ = FEAT / "passes_theo.parquet", FEAT / "passes_rlcs.parquet"
+    ft, fr_ = FEAT / f"passes_{SOURCE}.parquet", FEAT / "passes_rlcs.parquet"
     if not ft.exists() or not fr_.exists():
         return None
     t = pl.read_parquet(ft).filter(pl.col("replay").is_in(my_replays))
     r = pl.read_parquet(fr_)
-    sec_t, sec_r = play_seconds("theo"), play_seconds("rlcs")
+    sec_t, sec_r = play_seconds(SOURCE), play_seconds("rlcs")
 
     def summary(df: pl.DataFrame, secs: dict, key: str, label: str) -> dict:
         pm = df.select("replay", "player_id").unique()
@@ -455,11 +456,11 @@ def tech_metrics(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def tech_section(player: str, me: pl.DataFrame, peers: dict[str, pl.DataFrame], theo_all: pl.DataFrame) -> dict:
+def tech_section(player: str, me: pl.DataFrame, peers: dict[str, pl.DataFrame], perso_all: pl.DataFrame) -> dict:
     """Mesures techniques : toi, coéquipiers, tes lobbies (GC), SSL et RLCS (médianes par joueur-match)."""
     ssl = tech_metrics(pl.read_parquet(FEAT / "player_match_stats_ssl.parquet").filter(~pl.col("is_bot")))
     rl = tech_metrics(pl.read_parquet(FEAT / "player_match_stats_rlcs.parquet").filter(~pl.col("is_bot")))
-    lob = tech_metrics(theo_all.filter(pl.col("replay_file").is_in(me["replay_file"].to_list())
+    lob = tech_metrics(perso_all.filter(pl.col("replay_file").is_in(me["replay_file"].to_list())
                                        & ~pl.col("player_id").is_in([player, *peers]) & ~pl.col("is_bot")))
     mine = tech_metrics(me)
     rows = []
@@ -476,8 +477,8 @@ def tech_section(player: str, me: pl.DataFrame, peers: dict[str, pl.DataFrame], 
 
 
 def perf_section(player: str, my_replays: list[str], peers: dict[str, pl.DataFrame]) -> dict | None:
-    """Indice de performance RLPI (voir rlpi.perf) : par match et global, pour Théo, ses coéquipiers et ses lobbies."""
-    fp, rp = FEAT / "perf_theo.parquet", MODELS / "perf_report.json"
+    """Indice de performance RLPI (voir rlpi.perf) : par match et global, pour l'utilisateur, ses coéquipiers et ses lobbies."""
+    fp, rp = FEAT / f"perf_{SOURCE}.parquet", MODELS / "perf_report.json"
     if not fp.exists() or not rp.exists():
         return None
     from rlpi.perf import COMPONENTS, KEYS
@@ -522,8 +523,8 @@ def perf_section(player: str, my_replays: list[str], peers: dict[str, pl.DataFra
         "peers": {pid: summary(t.filter(pl.col("player_id") == pid)) for pid in peers},
         "lobby": summary(t.filter(~pl.col("player_id").is_in([player, *peers]))),
         "matches": matches,
-        "validation": {k: rep.get(k) for k in ("n_ref_player_matches", "n_ref_matches", "auc_player_oof",
-                                                "team_acc_oof", "theo_team_acc", "theo_n_matches", "rlcs_team_acc",
+        "validation": {k: rep.get(k, rep.get(k.replace("perso_", "theo_"))) for k in ("n_ref_player_matches", "n_ref_matches", "auc_player_oof",
+                                                "team_acc_oof", "perso_team_acc", "perso_n_matches", "rlcs_team_acc",
                                                 "rlcs_team_acc_prod", "rlcs_team_acc_fond", "rlcs_n_matches",
                                                 "retest", "split_half", "version")},
     }
@@ -583,7 +584,7 @@ def _syn_dir(g: pl.DataFrame, src: str) -> dict:
 
 def synergy_section(player: str, my_replays: list[str], peers: dict[str, pl.DataFrame]) -> dict | None:
     """Synergie par paire (voir rlpi.synergy), sur les parties retenues, face à « toi + un inconnu » et aux SSL."""
-    ft, fs = FEAT / "synergy_theo.parquet", FEAT / "synergy_ssl.parquet"
+    ft, fs = FEAT / f"synergy_{SOURCE}.parquet", FEAT / "synergy_ssl.parquet"
     if not ft.exists() or not fs.exists():
         return None
     t = pl.read_parquet(ft).filter(pl.col("replay").is_in(my_replays))
@@ -663,11 +664,11 @@ def heatmaps(player: str, my_replays: list[str], n_pro: int = 200, step: int = 5
 
     pros = sorted(p.name.removesuffix(".meta.json") for p in (FRAMES / "rlcs").glob("*.meta.json"))
     pros = pros[:: max(1, len(pros) // n_pro)][:n_pro]
-    occ_me = occupancy("theo", my_replays, lambda p: p["id"] == player)
-    occ_lobby = occupancy("theo", my_replays, lambda p: p["id"] != player)
+    occ_me = occupancy(SOURCE, my_replays, lambda p: p["id"] == player)
+    occ_lobby = occupancy(SOURCE, my_replays, lambda p: p["id"] != player)
     occ_pro = occupancy("rlcs", pros, lambda p: True)
 
-    t = pl.read_parquet(FEAT / "touch_values_theo.parquet").filter(
+    t = pl.read_parquet(FEAT / f"touch_values_{SOURCE}.parquet").filter(
         (pl.col("player_id") == player) & pl.col("replay").is_in(my_replays))
     rl = pl.read_parquet(FEAT / "touch_values_rlcs.parquet")
 
@@ -691,8 +692,8 @@ def heatmaps(player: str, my_replays: list[str], n_pro: int = 200, step: int = 5
 
 
 @lru_cache(maxsize=1)
-def _theo_metrics(mtime: float) -> pl.DataFrame:
-    return metrics(pl.read_parquet(FEAT / "player_match_stats_theo.parquet"))
+def _perso_metrics(mtime: float) -> pl.DataFrame:
+    return metrics(pl.read_parquet(FEAT / f"player_match_stats_{SOURCE}.parquet"))
 
 
 def filter_games(df: pl.DataFrame, since: str | None = None, until: str | None = None,
@@ -716,13 +717,13 @@ def filter_games(df: pl.DataFrame, since: str | None = None, until: str | None =
 def make_payload(player: str, compare_with: list[str] | None = None, since: str | None = None,
                  until: str | None = None, with_ids: list[str] | None = None,
                  without_ids: list[str] | None = None) -> dict:
-    theo = _theo_metrics((FEAT / "player_match_stats_theo.parquet").stat().st_mtime)
-    theo = filter_games(theo, since, until, with_ids, without_ids)
-    me = theo.filter(pl.col("player_id") == player).sort("date")
-    # Joueurs comparés : identifiants ou pseudos présents dans les parties de Théo
+    perso = _perso_metrics((FEAT / f"player_match_stats_{SOURCE}.parquet").stat().st_mtime)
+    perso = filter_games(perso, since, until, with_ids, without_ids)
+    me = perso.filter(pl.col("player_id") == player).sort("date")
+    # Joueurs comparés : identifiants ou pseudos présents dans les parties de l'utilisateur
     peers = {}
     for q in compare_with or []:
-        d = theo.filter((pl.col("player_id") == q) | (pl.col("player_name").str.to_lowercase() == q.lower()))
+        d = perso.filter((pl.col("player_id") == q) | (pl.col("player_name").str.to_lowercase() == q.lower()))
         if d.is_empty():
             print(f"  joueur comparé introuvable : {q}")
             continue
@@ -730,7 +731,7 @@ def make_payload(player: str, compare_with: list[str] | None = None, since: str 
         peers[pid] = d.filter(pl.col("player_id") == pid).sort("date")
     if me.is_empty():
         raise SystemExit(f"Joueur {player} absent des replays")
-    # Les autres joueurs des parties de Théo ne servent pas de référence (niveau inconnu).
+    # Les autres joueurs des parties de l'utilisateur ne servent pas de référence (niveau inconnu).
 
     refs = {}
     for key, (fname, label, min_n) in REFS.items():
@@ -760,14 +761,14 @@ def make_payload(player: str, compare_with: list[str] | None = None, since: str 
     }
     groups = [("me", payload["player"], me)]
     groups += [(pid, d["player_name"][-1], d) for pid, d in peers.items()]
-    lobby_df = theo.filter(pl.col("replay_file").is_in(me["replay_file"].to_list())
+    lobby_df = perso.filter(pl.col("replay_file").is_in(me["replay_file"].to_list())
                            & ~pl.col("player_id").is_in([player, *peers]) & ~pl.col("is_bot"))
     groups.append(("lobby", "Lobbies", lobby_df))
     for key, (fname, label, _) in REFS.items():
         if (FEAT / fname).exists():
             groups.append((key, f"Joueurs {label}", pl.read_parquet(FEAT / fname).filter(~pl.col("is_bot"))))
     payload["compo"] = compositions(groups)
-    payload["tech"] = tech_section(player, me, peers, theo)
+    payload["tech"] = tech_section(player, me, peers, perso)
     payload["record"] = [{"d": d, "w": bool(w), "s": f"{g}-{o}"}
                          for d, w, g, o in me.select("date", "won", "team_goals", "opp_goals").iter_rows()]
     payload["filters"] = {"since": since, "until": until, "with": with_ids or [], "without": without_ids or []}
@@ -785,9 +786,9 @@ def _styles_model(mtime: float) -> dict:
 
 
 @lru_cache(maxsize=1)
-def _theo_traits(mtime: float) -> pl.DataFrame:
+def _perso_traits(mtime: float) -> pl.DataFrame:
     from rlpi.styles import traits
-    return traits("theo")
+    return traits(SOURCE)
 
 
 def _style_scores(S: dict, X: np.ndarray) -> np.ndarray:
@@ -809,7 +810,7 @@ def style_section(player: str, my_replays: list[str], peers: dict[str, pl.DataFr
         return None
     S = _styles_model(mp.stat().st_mtime)
     T = S["traits"]
-    tr = _theo_traits((FEAT / "player_match_stats_theo.parquet").stat().st_mtime).filter(pl.col("replay").is_in(my_replays))
+    tr = _perso_traits((FEAT / f"player_match_stats_{SOURCE}.parquet").stat().st_mtime).filter(pl.col("replay").is_in(my_replays))
     W = np.array(S["W"])
 
     stable = [j for j, st in enumerate(S["styles"]) if st["retest"] >= 0.5]
@@ -975,10 +976,10 @@ def progress_section(payload: dict, last: int = 20) -> dict | None:
 
 def build(players: list[str], out: Path, since: str | None = None) -> Path:
     """Une page, un profil par joueur (le premier est affiché par défaut) ; chacun est comparé aux autres."""
-    theo = pl.read_parquet(FEAT / "player_match_stats_theo.parquet")
+    perso = pl.read_parquet(FEAT / f"player_match_stats_{SOURCE}.parquet")
     ids = []
     for q in players:
-        d = theo.filter((pl.col("player_id") == q) | (pl.col("player_name").str.to_lowercase() == q.lower()))
+        d = perso.filter((pl.col("player_id") == q) | (pl.col("player_name").str.to_lowercase() == q.lower()))
         if d.is_empty():
             print(f"  joueur introuvable : {q}")
             continue
@@ -997,8 +998,8 @@ def build(players: list[str], out: Path, since: str | None = None) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--player", required=True, help="identifiant, ex. Steam:7656... (profil affiché par défaut)")
-    ap.add_argument("--compare", nargs="*", default=[], help="autres profils, pseudos ou identifiants (ex. Rileq LAinox)")
+    ap.add_argument("--player", default=config.PLAYER, required=not config.PLAYER, help="identifiant, ex. Steam:7656... (profil affiché par défaut)")
+    ap.add_argument("--compare", nargs="*", default=config.COMPARE, help="autres profils, pseudos ou identifiants (ex. Pseudo1 Pseudo2)")
     ap.add_argument("--since", help="ne garder que les parties à partir de cette date (AAAA-MM-JJ)")
     ap.add_argument("--out", default=str(ROOT / "reports" / "tableau_de_bord.html"))
     a = ap.parse_args()

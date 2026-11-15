@@ -10,7 +10,7 @@ Placement (images à 10 i/s, jeu en cours, vue de l'équipe) :
   - montés ensemble : ni A ni B entre la balle et le but, le 3e coéquipier à > 3 000 uu de la balle ;
   - écart moyen entre A et B.
 
-Usage : python -m rlpi.synergy --source theo|ssl [--limit N]  → data/features/synergy_{source}.parquet
+Usage : python -m rlpi.synergy --source perso|ssl [--limit N]  → data/features/synergy_{source}.parquet
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from itertools import combinations
 import numpy as np
 import polars as pl
 
-from rlpi.config import FEATURES, FRAMES
+from rlpi.config import FEATURES, FRAMES, SOURCE
 
 FPS = 10
 CHAIN_S = 3.0
@@ -90,7 +90,7 @@ def run(source: str, limit: int | None) -> pl.DataFrame:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default="theo")
+    ap.add_argument("--source", default=SOURCE)
     ap.add_argument("--limit", type=int)
     a = ap.parse_args()
     df = run(a.source, a.limit)

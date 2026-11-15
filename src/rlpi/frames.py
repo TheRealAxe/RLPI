@@ -10,7 +10,7 @@ Slots joueurs 0-2 = équipe 0, 3-5 = équipe 1 (ordre de subtr-actor).
 
 Usage :
     python -m rlpi.frames --source rlcs [--limit 10]
-    python -m rlpi.frames --source theo --dir "C:/.../TAGame/Demos"
+    python -m rlpi.frames --source perso --dir "C:/.../TAGame/Demos"
 """
 from __future__ import annotations
 

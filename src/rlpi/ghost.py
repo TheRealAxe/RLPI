@@ -1,11 +1,11 @@
-"""Fantôme pro (prototype) : pour une touche de Théo, retrouve les situations RLCS les plus proches
+"""Fantôme pro (prototype) : pour une touche de l'utilisateur, retrouve les situations RLCS les plus proches
 et exporte les trajectoires (1,5 s avant → 3 s après la touche) pour une page de comparaison 2D.
 
 Tout est ramené dans le repère du toucheur : il attaque vers +y. Les situations pro peuvent aussi être
 retournées gauche/droite (x → −x) pour doubler les exemples.
 
 Usage :
-    python -m rlpi.ghost --player Axe --since 2026-11-14 [--rank 0] [--source-ref rlcs]
+    python -m rlpi.ghost --player <pseudo ou identifiant> --since 2026-11-14 [--rank 0] [--source-ref rlcs]
 """
 from __future__ import annotations
 
@@ -15,7 +15,9 @@ import json
 import numpy as np
 import polars as pl
 
-from rlpi.config import FEATURES, FRAMES
+import os
+
+from rlpi.config import FEATURES, FRAMES, SOURCE
 from rlpi.decisions import ACTION_FR, ACTIONS
 from rlpi.value import load_replay
 
@@ -80,7 +82,7 @@ def track(f: pl.DataFrame, m: dict, i: int, slot: int, team: int, flip: float) -
 
 
 def pick_target(player: str, since: str, rank: int) -> dict:
-    d = pl.read_parquet(FEATURES / "touch_decisions_theo.parquet")
+    d = pl.read_parquet(FEATURES / f"touch_decisions_{SOURCE}.parquet")
     d = (d.filter((pl.col("player_name") == player) & (pl.col("date") >= since)
                   & pl.col("adequacy").is_not_null() & (pl.col("act") != pl.col("best_action")))
           .sort("regret", descending=True))
@@ -89,7 +91,7 @@ def pick_target(player: str, since: str, rank: int) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--player", default="Axe")
+    ap.add_argument("--player", default=os.getenv("RLPI_PLAYER", ""))
     ap.add_argument("--since", default="2026-11-14")
     ap.add_argument("--rank", type=int, default=0)
     ap.add_argument("--ref", default="rlcs")
@@ -97,7 +99,7 @@ def main() -> None:
     a = ap.parse_args()
 
     tgt = pick_target(a.player, a.since, a.rank)
-    m, f = _meta("theo", tgt["replay"])
+    m, f = _meta(SOURCE, tgt["replay"])
     slot, team = _slot_team(m, tgt["player_id"])
     q = state_vec(f, m, tgt["i"] - 2, slot, team, 1.0)
     s = 1.0 if team == 0 else -1.0

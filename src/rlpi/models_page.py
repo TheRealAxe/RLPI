@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from rlpi.config import FEATURES, FRAMES, MODELS, ROOT
+from rlpi.config import FEATURES, FRAMES, MODELS, ROOT, SOURCE
 
 TEMPLATE = Path(__file__).parent / "dashboard_template.html"
 OUT = ROOT / "reports" / "modeles.html"
@@ -41,7 +41,7 @@ def plateau_css() -> str:
 
 def goal_detection() -> dict:
     ok = tot = 0
-    for src in ("rlcs", "ssl", "theo"):
+    for src in ("rlcs", "ssl", SOURCE):
         for mp in (FRAMES / src).glob("*.meta.json"):
             m = json.loads(mp.read_text(encoding="utf-8"))
             tot += 1
@@ -154,7 +154,7 @@ def build() -> Path:
             f"Poids appris sur ce qui fait gagner en SSL (régression logistique, poids négatifs mis à 0) : {wtxt}.",
             "<b>Version 2 (14/11/2026)</b> : une touche qui marque est créditée de la valeur que le modèle donnait au tir juste avant la ligne (≈ 0,75), plus d'un +1 automatique. En v1, un tiers de l'impact venait des seuls buts.",
             "Note = centile parmi les performances SSL (50 = SSL médian dans une partie SSL)."],
-        [("Pertinence", pc(p["rlcs_team_acc"]), f"équipe au meilleur indice moyen = gagnante, {p['rlcs_n_matches']} matchs RLCS jamais vus", f"Validation croisée SSL : {pc(p['team_acc_oof'])} · tes parties : {pc(p['theo_team_acc'])} ({p['theo_n_matches']}). Production seule : {pc(p['rlcs_team_acc_prod'])} · fondamentaux seuls : {pc(p['rlcs_team_acc_fond'])}.", "ok"),
+        [("Pertinence", pc(p["rlcs_team_acc"]), f"équipe au meilleur indice moyen = gagnante, {p['rlcs_n_matches']} matchs RLCS jamais vus", f"Validation croisée SSL : {pc(p['team_acc_oof'])} · tes parties : {pc(p.get('perso_team_acc', p.get('theo_team_acc')))} ({p.get('perso_n_matches', p.get('theo_n_matches'))}). Production seule : {pc(p['rlcs_team_acc_prod'])} · fondamentaux seuls : {pc(p['rlcs_team_acc_fond'])}.", "ok"),
          ("Pertinence", f"ρ {fr(pv['rho'])}", "corrélation avec le score affiché en jeu (SSL)", "Lié au score du jeu mais différent : l'indice compte aussi le boost, la vitesse et les passes, et retire des points quand une touche dégrade la situation.", "mid"),
          ("Fiabilité", fr(sh.get("index", float("nan"))), "accord entre les deux moitiés d'un même match (SSL) · 0,7 = bon", "Une note de match est surtout le reflet de quelques grosses touches : elle raconte ce qui s'est passé, elle ne mesure pas un niveau.", "bad"),
          ("Fiabilité", f"{rt['index']['matches_for_08']} parties", "pour une moyenne fiable (0,8), test-retest sur les pros RLCS", f"Fondamentaux : {rt['fond']['matches_for_08']} parties · production : {imp_need}. Juge ta progression sur des moyennes, pas sur un match.", "mid")],

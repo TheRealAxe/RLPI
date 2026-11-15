@@ -9,14 +9,14 @@ Pour chacune :
     près que l'adversaire le plus proche ?
   - gain de valeur à 2 s (ΔV), pour voir ce que coûte une passe dans le vide.
 
-Usage : python -m rlpi.passes  → data/features/passes_{rlcs,theo}.parquet
+Usage : python -m rlpi.passes  → data/features/passes_{rlcs,perso}.parquet
 """
 from __future__ import annotations
 
 import numpy as np
 import polars as pl
 
-from rlpi.config import FEATURES, FRAMES
+from rlpi.config import FEATURES, FRAMES, SOURCE
 from rlpi.value import load_replay
 
 GIVE = ("forward", "side", "back")
@@ -57,7 +57,7 @@ def build(source: str) -> pl.DataFrame:
 
 
 def main() -> None:
-    for src in ("rlcs", "theo"):
+    for src in ("rlcs", SOURCE):
         df = build(src)
         df.write_parquet(FEATURES / f"passes_{src}.parquet")
         print(f"→ passes_{src}.parquet : {df.height:,} balles données")

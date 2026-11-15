@@ -1,7 +1,7 @@
 """Extraction des stats par joueur et par match avec subtr-actor (prototype de dashboard).
 
 Usage :
-    python -m rlpi.stats --source theo --dir "C:/.../TAGame/Demos" --online-3v3
+    python -m rlpi.stats --source perso --dir "C:/.../TAGame/Demos" --online-3v3
     python -m rlpi.stats --source rlcs --limit 30
 Sortie : data/features/player_match_stats_<source>.parquet (une ligne par joueur et par match).
 """

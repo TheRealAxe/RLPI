@@ -368,7 +368,7 @@ const ALL = /*__DATA__*/null;
 if (!ALL) {
   document.querySelector(".wrap").innerHTML = `<div class="card" style="margin-top:40px"><h3>Ceci est le gabarit, sans données</h3>
     <p class="sub">La page se trouve dans <b>reports/tableau_de_bord.html</b>. Pour la régénérer :<br>
-    <code>.venv/Scripts/python -m rlpi.dashboard --player "Steam:76561198078330309" --compare LAinox Rileq</code></p></div>`;
+    <code>.venv/Scripts/python -m rlpi.dashboard --player "Steam:&lt;ton identifiant&gt;" --compare Pseudo1 Pseudo2</code></p></div>`;
   throw new Error("gabarit sans données");
 }
 // Profil affiché : ?j=<identifiant> dans l'adresse, sinon le joueur par défaut
@@ -531,7 +531,7 @@ function perf() {
     <b>Étape 2 — poids.</b> Une régression logistique régularisée apprend, sur ces joueurs-matchs SSL, quelles composantes distinguent les joueurs de l'équipe gagnante ; un poids négatif est ramené à 0, puis les poids sont ramenés à 100 % : ${wl}. Le nombre de buts et le score ne sont pas des composantes ; en revanche, une touche qui marque compte dans l'impact (la valeur de la situation passe à +1), comme toute action décisive.<br>
     <b>Étape 3 — note.</b> Score = somme pondérée des composantes ; indice = centile de ce score parmi les joueurs-matchs SSL.<br>
     <b>Global</b> = moyenne de tes indices de match. Fourchette : 80 % des moyennes obtenues en retirant au hasard tes parties (bootstrap, 2 000 tirages), pour tenir compte du petit nombre de parties.<br>
-    <b>Fiabilité.</b> Dans les parties SSL (poids appris sans ces parties, validation croisée en 5 groupes de parties), l'équipe dont l'indice moyen est le plus haut gagne ${Math.round(val.team_acc_oof * 100)} % du temps ; sur tes ${val.theo_n_matches} parties, jamais utilisées pour l'apprentissage : ${Math.round(val.theo_team_acc * 100)} %. Pour un joueur seul, l'indice sépare gagnants et perdants avec une AUC de ${val.auc_player_oof.toFixed(2).replace(".", ",")}.`;
+    <b>Fiabilité.</b> Dans les parties SSL (poids appris sans ces parties, validation croisée en 5 groupes de parties), l'équipe dont l'indice moyen est le plus haut gagne ${Math.round(val.team_acc_oof * 100)} % du temps ; sur tes ${val.perso_n_matches} parties, jamais utilisées pour l'apprentissage : ${Math.round(val.perso_team_acc * 100)} %. Pour un joueur seul, l'indice sépare gagnants et perdants avec une AUC de ${val.auc_player_oof.toFixed(2).replace(".", ",")}.`;
   // comparaison globale
   const cmp = $("#perf-cmp"); cmp.innerHTML = "";
   const rowsC = [{ name: BASE.player, v: me, mk: "me" }, ...shown().map(p => ({ name: p.name, v: PF.peers[p.id], p })), { name: "Lobbies", v: PF.lobby, mk: "ref" }];
@@ -947,7 +947,7 @@ function h2h() {
     el("line", { x1: c0, x2: c0, y1: 0, y2: 22, stroke: "var(--axis)" }, svg);
     if (r.me != null && r.peer != null) {
       const scale = Math.max(Math.abs(r.me), Math.abs(r.peer)) || 1;
-      const rel = Math.max(-1, Math.min(1, (r.me - r.peer) / scale)); // >0 : valeur de Théo plus grande
+      const rel = Math.max(-1, Math.min(1, (r.me - r.peer) / scale)); // >0 : valeur de l'utilisateur plus grande
       const meBetter = r.sens === 0 ? null : (r.sens > 0) === (r.me > r.peer);
       const len = Math.abs(rel) * (c0 - 4), dir = meBetter === null ? (rel >= 0 ? -1 : 1) : meBetter ? -1 : 1;
       const color = meBetter === null ? "var(--ref)" : meBetter ? "var(--me)" : p.color;
@@ -1107,7 +1107,7 @@ function methods() {
   const set = (id, html) => { const e = document.getElementById(id); if (e) e.innerHTML = html; };
   set("cat-sub", `<b>Calcul.</b> Pour chaque indicateur : ta moyenne sur tes ${BASE.n_matches} parties est comparée aux moyennes par joueur de la référence. Le <b>centile</b> = part des joueurs de la référence sous ta valeur (égalités comptées pour moitié). Pour un indicateur où « plus bas = mieux », la note = 100 − centile. La note de catégorie = moyenne des notes de ses indicateurs ; les indicateurs de style (sans bon sens absolu) n'y entrent pas.<br>${Rd}<br><b>Notes des modèles</b> : placement = 100 − centile de ton écart médian à la position « pro » parmi les joueurs-matchs RLCS ; résultat = centile de ton gain par 5 min parmi les autres joueurs de tes parties ; choix = expérimental (voir « À lire »).`);
   set("div-sub", `<b>Calcul.</b> Barre = note − 50, où note = centile (ou 100 − centile si « plus bas = mieux ») de ta moyenne face aux moyennes par joueur de la référence. « Mieux que 80 % » = ta valeur est meilleure que celle de 80 % des joueurs ${R}. Marqueurs : la même note pour tes coéquipiers, calculée sur toutes leurs parties enregistrées. Survole une barre pour la définition exacte de l'indicateur.<br>${Rd}`);
-  set("m-style", `<b>Calcul.</b> Pour chaque groupe, on additionne les temps passés dans chaque catégorie sur toutes ses parties, puis on divise par le temps total suivi (une partie longue pèse donc plus). « Lobbies » = tous les autres joueurs humains de tes parties (coéquipiers et adversaires, hors LAinox et Rileq). « Joueurs ${R} » = tous les joueurs-matchs de la référence. Pas de note ici : ce sont des choix de style. Survole un segment pour la valeur exacte et le « ? » de chaque carte pour sa définition.<br>${SRC}`);
+  set("m-style", `<b>Calcul.</b> Pour chaque groupe, on additionne les temps passés dans chaque catégorie sur toutes ses parties, puis on divise par le temps total suivi (une partie longue pèse donc plus). « Lobbies » = tous les autres joueurs humains de tes parties (coéquipiers et adversaires, hors coéquipiers suivis). « Joueurs ${R} » = tous les joueurs-matchs de la référence. Pas de note ici : ce sont des choix de style. Survole un segment pour la valeur exacte et le « ? » de chaque carte pour sa définition.<br>${SRC}`);
   BASE.compo.forEach((c, i) => { const card = $("#compo").children[i]; if (!card || card.querySelector(".sub")) return;
     card.querySelector("h3").insertAdjacentHTML("afterend", `<p class="sub">${COMPO_DEF[c.key] || ""} Seuils et classements : détecteurs de subtr-actor 1.5.1.</p>`); });
   const H = BASE.heat;
@@ -1153,7 +1153,7 @@ function glossary() {
         `<b>On en fait une note</b> : la somme pondérée est convertie en centile parmi les performances SSL. 70 = tu as fait mieux que 70 % des performances de SSL.`,
         `<b>Indice global</b> = moyenne de tes matchs, avec une fourchette qui dit à quel point cette moyenne pourrait bouger avec d'autres parties.`],
       example: PF ? `Poids actuels : ${[...PF.components].sort((a, b) => b.weight - a.weight).map(c => `${c.label.toLowerCase()} ${Math.round(c.weight * 100)} %`).join(", ")}. Un match où tu as beaucoup apporté avec tes touches et rarement été à sec de boost sort vers 70–80, même perdu.` : "",
-      read: ["Au-dessus de 55 : bien joué dans cette partie ; 45–55 : correct ; en dessous de 45 : tu as moins pesé que les autres.", PF ? `Pourquoi ce n'est pas un niveau : les autres joueurs de tes parties, GC comme toi, obtiennent ${Math.round(PF.lobby.mean)} en moyenne, presque comme des SSL entre eux. L'impact de tes touches (la moitié de la note) est plus facile à obtenir face à des adversaires plus faibles. Ton niveau technique est mesuré à part, dans la section « Technique ».` : "", "Le détail d'un match (clic sur une barre) montre quelle composante a fait monter ou baisser la note ce jour-là.", val ? `Fiabilité vérifiée : l'équipe dont l'indice moyen est le plus haut gagne ${Math.round(val.team_acc_oof * 100)} % des parties SSL et ${Math.round(val.theo_team_acc * 100)} % de tes parties.` : ""],
+      read: ["Au-dessus de 55 : bien joué dans cette partie ; 45–55 : correct ; en dessous de 45 : tu as moins pesé que les autres.", PF ? `Pourquoi ce n'est pas un niveau : les autres joueurs de tes parties, GC comme toi, obtiennent ${Math.round(PF.lobby.mean)} en moyenne, presque comme des SSL entre eux. L'impact de tes touches (la moitié de la note) est plus facile à obtenir face à des adversaires plus faibles. Ton niveau technique est mesuré à part, dans la section « Technique ».` : "", "Le détail d'un match (clic sur une barre) montre quelle composante a fait monter ou baisser la note ce jour-là.", val ? `Fiabilité vérifiée : l'équipe dont l'indice moyen est le plus haut gagne ${Math.round(val.team_acc_oof * 100)} % des parties SSL et ${Math.round(val.perso_team_acc * 100)} % de tes parties.` : ""],
       limits: ["L'impact des touches pèse plus de la moitié : une touche qui marque y compte beaucoup.", "Les poids reflètent ce qui fait gagner en SSL, pas forcément ce qui fait progresser.", "Ne voit pas la communication, le mental ni les feintes : seulement ce qui se mesure dans le replay."] },
     { id: "valeur", title: "Valeur de la situation",
       what: "À chaque instant du match, un chiffre entre −1 et +1 qui dit si la situation est favorable à ton équipe : +1 = vous allez marquer, −1 = vous allez encaisser, 0 = rien de décisif.",

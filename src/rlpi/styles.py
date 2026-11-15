@@ -15,9 +15,10 @@ import json
 import numpy as np
 import polars as pl
 
+from rlpi import config
 from rlpi.config import FEATURES, FRAMES, MODELS
 
-ME = "Steam:76561198078330309"
+ME = config.PLAYER
 
 
 def traits(source: str) -> pl.DataFrame:
