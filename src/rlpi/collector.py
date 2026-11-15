@@ -41,13 +41,46 @@ def _ts(s: str | None) -> datetime | None:
     return datetime.fromisoformat(s.replace("Z", "+00:00")) if s else None
 
 
+def download_interval() -> float:
+    """Secondes entre deux téléchargements ballchasing, tous workers confondus. Compte « regular » : 200 par heure,
+    soit 18 s (limites de la librairie python-ballchasing ; gold 9 s, diamond 3,6 s, champion 1,8 s)."""
+    return float(os.getenv("RLPI_BC_DOWNLOAD_INTERVAL", "18"))
+
+
+def wait_download_slot(r) -> None:
+    """Limite commune à tous les workers : un téléchargement ballchasing au plus toutes les download_interval() s."""
+    ms = int(download_interval() * 1000)
+    while not r.set("rlpi:bc_download", "1", nx=True, px=ms):
+        time.sleep(max(r.pttl("rlpi:bc_download"), 100) / 1000)
+
+
+def fetch_replay(match_id: str, conn, r, cli, api=None) -> str:
+    """Télécharge le replay d'une partie ballchasing et le dépose dans le stockage. Retourne sa clé."""
+    from rlpi.config import ballchasing_api
+
+    api = api or ballchasing_api()
+    key = f"replays/{match_id}.replay"
+    tmp = Path(tempfile.mkdtemp(prefix="rlpi_dl_"))
+    try:
+        wait_download_slot(r)
+        f = api.download_replay(match_id, tmp)
+        cli.upload_file(str(f), store.bucket(), key)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    conn.execute("UPDATE matches SET replay_key = %s, updated_at = now() WHERE id = %s", (key, match_id))
+    return key
+
+
 def sync_player(player_id: str, log=print, conn=None, r=None, cli=None, api=None) -> int:
-    """Met en file les nouvelles parties ballchasing d'un joueur inscrit. Retourne le nombre de parties ajoutées."""
+    """Met en file les nouvelles parties ballchasing d'un joueur inscrit. Retourne le nombre de parties ajoutées.
+
+    Ne télécharge rien (la liste est rapide) : chaque partie est téléchargée par le worker qui la traite, pour que
+    les premières parties soient traitées sans attendre la fin de tous les téléchargements.
+    """
     from rlpi.config import ballchasing_api
 
     conn = conn or store.db()
     r = r or store.redis_client()
-    cli, b = cli or store.s3(), store.bucket()
     api = api or ballchasing_api()
     row = conn.execute("SELECT synced_until FROM accounts WHERE player_id = %s", (player_id,)).fetchone()
     if row is None:
@@ -59,27 +92,19 @@ def sync_player(player_id: str, log=print, conn=None, r=None, cli=None, api=None
     if since is not None:
         query["created_after"] = since.isoformat()
     newest, added = since, 0
-    tmp = Path(tempfile.mkdtemp(prefix="rlpi_sync_"))
+    conn.execute("UPDATE accounts SET sync_started = now() WHERE player_id = %s", (player_id,))
     try:
         for rep in api.get_replays(**query):
             created = _ts(rep.get("created"))
             if created and (newest is None or created > newest):
                 newest = created
-            rid = rep["id"]
-            if conn.execute("SELECT 1 FROM matches WHERE id = %s", (rid,)).fetchone():
-                continue
-            f = api.download_replay(rid, tmp)
-            key = f"replays/{rid}.replay"
-            cli.upload_file(str(f), b, key)
-            Path(f).unlink(missing_ok=True)
             ins = conn.execute(
-                "INSERT INTO matches (id, source, status, replay_key, played_at) VALUES (%s, 'ballchasing', "
-                "'en_attente', %s, %s) ON CONFLICT (id) DO NOTHING RETURNING id", (rid, key, rep.get("date")))
+                "INSERT INTO matches (id, source, status, played_at) VALUES (%s, 'ballchasing', 'en_attente', %s) "
+                "ON CONFLICT (id) DO NOTHING RETURNING id", (rep["id"], rep.get("date")))
             if ins.fetchone():
-                store.push_match(r, rid)
+                store.push_match(r, rep["id"])
                 added += 1
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
         conn.execute("UPDATE accounts SET last_sync = now(), synced_until = %s WHERE player_id = %s",
                      (newest, player_id))
     log(f"sync {player_id} : {added} nouvelle(s) partie(s) en file")

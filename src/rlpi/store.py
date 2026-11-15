@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     last_sync    timestamptz,                       -- dernière recherche sur ballchasing
     synced_until timestamptz                        -- date d'envoi sur ballchasing de la plus récente partie vue
 );
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS sync_started timestamptz;   -- début de la dernière recherche
 CREATE TABLE IF NOT EXISTS matches (
     id            text        PRIMARY KEY,          -- identifiant ballchasing (ou nom du fichier)
     source        text        NOT NULL,             -- ballchasing | fichier

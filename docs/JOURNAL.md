@@ -778,3 +778,12 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
   cookie falsifié refusé, réponse Steam forgée refusée, routes et bandeau OK. Non testé : Postgres, Redis, Garage et
   Steam réels (à valider sur le serveur, étape B6 bis).
 - Point à vérifier : conditions d'utilisation de l'API ballchasing pour un service à plusieurs utilisateurs.
+- Constat en production : aucune partie traitée pendant de longues minutes. Cause : compte ballchasing « regular »
+  = 200 téléchargements par heure (un toutes les 18 s, limites de python-ballchasing) et la recherche téléchargeait
+  les 50 parties avant d'en traiter une seule. Correction : la recherche ne fait que lister et mettre en file
+  (`matches.replay_key` vide) ; le worker télécharge chaque partie juste avant de la traiter, avec une limite commune
+  à tous les workers (verrou Redis, `RLPI_BC_DOWNLOAD_INTERVAL`, 18 s par défaut). Page d'import : « recherche en
+  cours » (colonne `accounts.sync_started`).
+- Conséquence à retenir : avec ce compte, 200 nouvelles parties par heure au maximum pour tout le service
+  (≈ 4 nouveaux inscrits par heure à 50 parties). Un abonnement ballchasing plus élevé relève la limite
+  (gold 400/h, diamond 1 000/h, champion 2 000/h) : régler alors `RLPI_BC_DOWNLOAD_INTERVAL`.

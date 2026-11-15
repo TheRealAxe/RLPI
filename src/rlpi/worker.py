@@ -26,6 +26,8 @@ Variables d'environnement :
     RLPI_MODELS                                   dossier des modèles (/app/models dans l'image)
     RLPI_SYNC_MINUTES                             intervalle des recherches automatiques (défaut 15, 0 = jamais)
     RLPI_FIRST_SYNC                               parties importées au premier passage d'un joueur (défaut 50)
+    RLPI_BC_DOWNLOAD_INTERVAL                     secondes entre deux téléchargements ballchasing, tous workers
+                                                  confondus (défaut 18 : compte « regular », 200 par heure)
     RLPI_KEEP_REPLAYS                             1 (défaut) garde le .replay dans le stockage, 0 le supprime
     RLPI_GAME_TIMEOUT                             durée maximale d'une partie en secondes (défaut 900)
 """
@@ -115,6 +117,13 @@ class Worker:
         self.r, self.s3, self.bucket = store.redis_client(), store.s3(), store.bucket()
         self.conn = store.db()
 
+    def bc_api(self):
+        if getattr(self, "_bc", None) is None:
+            from rlpi.config import ballchasing_api
+
+            self._bc = ballchasing_api()
+        return self._bc
+
     # Arrêt propre : Coolify envoie SIGTERM au redéploiement ; on finit la tâche en cours.
     def _on_signal(self, *_):
         log("arrêt demandé : fin de la tâche en cours puis sortie")
@@ -163,6 +172,8 @@ class Worker:
         log(f"début {mid} (essai {attempts})")
         tmp = Path(tempfile.mkdtemp(prefix="rlpi_"))
         try:
+            if not key:  # partie trouvée sur ballchasing : on la télécharge maintenant (limite commune de débit)
+                key = collector.fetch_replay(mid, self.conn, self.r, self.s3, self.bc_api())
             local = tmp / f"{mid}.replay"
             self.s3.download_file(self.bucket, key, str(local))
             out = tmp / "partie"
@@ -209,7 +220,7 @@ class Worker:
         task = json.loads(raw)
         if task.get("type") == "sync":
             try:
-                collector.sync_player(task["player"], log, self.conn, self.r, self.s3)
+                collector.sync_player(task["player"], log, self.conn, self.r, api=self.bc_api())
             except Exception as e:  # noqa: BLE001
                 log(f"sync {task['player']} : échec {type(e).__name__}: {e}"[:500])
         elif task.get("type") == "match":

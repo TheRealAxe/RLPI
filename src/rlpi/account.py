@@ -144,11 +144,12 @@ def refresh(player_id: str) -> bool:
 
 def import_state(player_id: str) -> dict:
     with store.db() as c:
-        acc = c.execute("SELECT last_sync, created_at FROM accounts WHERE player_id = %s", (player_id,)).fetchone()
+        acc = c.execute("SELECT last_sync, sync_started FROM accounts WHERE player_id = %s", (player_id,)).fetchone()
         done = c.execute("SELECT count(*) FROM match_players mp JOIN matches m ON m.id = mp.match_id "
                          "WHERE mp.player_id = %s AND m.status IN ('ok', 'partiel')", (player_id,)).fetchone()[0]
         waiting = c.execute("SELECT count(*) FROM matches WHERE status IN ('en_attente', 'en_cours')").fetchone()[0]
-    return {"last_sync": acc[0] if acc else None, "done": done, "waiting": waiting}
+    running = bool(acc and acc[1] and (acc[0] is None or acc[1] > acc[0]))
+    return {"last_sync": acc[0] if acc else None, "running": running, "done": done, "waiting": waiting}
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -185,13 +186,20 @@ def login_page() -> str:
 
 
 def import_page(player_id: str, st: dict) -> str:
-    last = st["last_sync"].strftime("%d/%m %H:%M") if st["last_sync"] else "en attente"
+    if st["running"]:
+        last = "en cours"
+    elif st["last_sync"]:
+        last = "faite le " + st["last_sync"].strftime("%d/%m à %H:%M")
+    else:
+        last = "pas encore commencée (elle démarre dès qu'un worker est libre)"
     return page("RLPI — import en cours", "<h1>Import de tes parties</h1>"
                 f"<p>Compte : {html.escape(player_id)}</p>"
-                f"<p>Recherche sur ballchasing : {last}. Parties traitées : {st['done']}. "
-                f"Parties en file (tous joueurs) : {st['waiting']}.</p>"
-                "<p class='note'>Compte 15 à 40 secondes par partie. La page se met à jour toute seule. "
-                "Si aucune partie n'apparaît, vérifie que tes replays sont publics sur ballchasing.com.</p>"
+                f"<p>Recherche sur ballchasing : {last}.<br>Parties à toi déjà traitées : {st['done']}.<br>"
+                f"Parties en attente de traitement (tous joueurs) : {st['waiting']}.</p>"
+                "<p class='note'>Chaque partie est téléchargée sur ballchasing (une toutes les 18 secondes au plus) "
+                "puis analysée (15 à 40 secondes). Ton tableau de bord s'affiche dès ta première partie traitée. "
+                "La page se met à jour toute seule. Si rien n'arrive, vérifie que tes replays sont publics sur "
+                "ballchasing.com.</p>"
                 "<a class='btn' href='/deconnexion'>Se déconnecter</a>", refresh_s=30)
 
 
