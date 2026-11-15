@@ -733,3 +733,7 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
 - `worker enqueue --ballchasing N` / `--ballchasing-id ID…` : met en file des parties téléchargées depuis
   ballchasing (pour tester sans SSH). L'API refuse `sort-by=upload-date` : tri `created`. Constat : l'auto-upload
   n'a jamais tourné qu'en `--dry-run`, le compte ballchasing de la clé ne contient que des parties 2019-2020.
+- Mise en service sur le M920q (2026-11-15) : `rlpi-worker-1` créé dans Coolify, `worker check` tout OK
+  (modèles, Redis, Postgres, Garage), 3 parties de Théo traitées de bout en bout via `enqueue --ballchasing 3`
+  (confirmé par Théo). Pièges rencontrés : URL Redis copiée masquée, `S3_ENDPOINT` collé avec la syntaxe d'un lien
+  Markdown ; Garage rattaché au réseau partagé de Coolify. Temps par partie sur le serveur : pas encore relevé.
