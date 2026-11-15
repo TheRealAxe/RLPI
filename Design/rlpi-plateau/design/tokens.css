@@ -1,0 +1,46 @@
+/* RLPI · Plateau — jetons de design. Source : tokens.json. */
+@import url("https://fonts.googleapis.com/css2?family=Sofia+Sans+Extra+Condensed:ital,wght@1,800;1,900&family=Sofia+Sans:wght@400;500;700;800&display=swap");
+
+:root {
+  color-scheme: dark;
+  --surface: #0b0d11;
+  --surface-alt: #171a21;
+  --panel: #f3f3ee;
+  --panel-alt: #e2e2db;
+  --ink: #f3f3ee;
+  --ink-muted: #9aa1ab;
+  --panel-ink: #0b0d11;
+  --panel-muted: #55585f;
+  --rule: #2a2f38;
+  --panel-rule: #c9c9c1;
+  --accent: #d4ff3a;
+  --accent-ink: #d4ff3a;
+  --on-accent: #0b0d11;
+  --good: #1d63c9;
+  --good-on-dark: #6eb0ff;
+  --bad: #e2622e;
+  --bad-ink: #b8410f;
+  --me: #d4ff3a;
+  --mate-1: #ff9a5c;
+  --mate-2: #5fd0a4;
+  --ref: #7c838d;
+  --map-0: #151922;
+  --map-1: #1c3155;
+  --map-2: #24508f;
+  --map-3: #3d7fd6;
+  --map-4: #9cc6ff;
+  --div-neg: #e2622e;
+  --div-neg-soft: #7a3b22;
+  --div-mid: #20242c;
+  --div-pos-soft: #25467a;
+  --div-pos: #4f9bff;
+  --focus: #d4ff3a;
+
+  --font-display: "Sofia Sans Extra Condensed", "Arial Narrow", sans-serif;
+  --font-sans: "Sofia Sans", "Helvetica Neue", Arial, sans-serif;
+
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-12: 48px;
+
+  --cut-sm: 10px; --cut-md: 14px; --cut-lg: 16px;
+}

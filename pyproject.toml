@@ -12,6 +12,7 @@ dependencies = [
     "requests>=2.32",
     "python-ballchasing>=0.5.4",
     "polars>=2.0",
+    "numpy>=2",
     "pyarrow>=20",
     "pyyaml>=6",
 ]

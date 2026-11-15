@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 import polars as pl
@@ -105,11 +106,12 @@ KEYS = [m[0] for m in METRICS]
 
 
 def percentile(value: float, ref: list[float]) -> float | None:
-    ref = [r for r in ref if r is not None]
-    if value is None or not ref:
+    if value is None:
         return None
-    below = sum(r < value for r in ref) + 0.5 * sum(r == value for r in ref)
-    return 100 * below / len(ref)
+    a = np.asarray([r for r in ref if r is not None], dtype=float)
+    if not len(a):
+        return None
+    return float(100 * ((a < value).sum() + 0.5 * (a == value).sum()) / len(a))
 
 
 # Références disponibles : (fichier, libellé, nb minimal de matchs par joueur)
@@ -184,11 +186,18 @@ ACTION_FR = {"shot": "Tirs", "save": "Arrêts", "clear": "Dégagements", "pass":
 RANKED_GOAL_RATIO = 1.5
 
 
-def play_seconds(source: str) -> dict[str, float]:
+@lru_cache(maxsize=None)
+def _play_seconds(source: str) -> tuple:
     from rlpi.config import FRAMES
-    return {json.loads(p.read_text(encoding="utf-8"))["replay"]:
-            json.loads(p.read_text(encoding="utf-8"))["n_play_frames"] / 10
-            for p in (FRAMES / source).glob("*.meta.json")}
+    out = []
+    for p in (FRAMES / source).glob("*.meta.json"):
+        m = json.loads(p.read_text(encoding="utf-8"))
+        out.append((m["replay"], m["n_play_frames"] / 10))
+    return tuple(out)
+
+
+def play_seconds(source: str) -> dict[str, float]:
+    return dict(_play_seconds(source))
 
 
 def value_section(player: str, my_replays: list[str]) -> dict | None:
@@ -485,6 +494,8 @@ def perf_section(player: str, my_replays: list[str], peers: dict[str, pl.DataFra
         boots = [rng.choice(x, len(x)).mean() for _ in range(2000)]
         return {"mean": float(x.mean()), "lo": float(np.percentile(boots, 10)), "hi": float(np.percentile(boots, 90)),
                 "n": len(x), "comps": {k: float(df[f"c_{k}"].mean()) for k in KEYS},
+                "prod": float(df["prod"].mean()) if "prod" in df.columns else None,
+                "fond": float(df["fond"].mean()) if "fond" in df.columns else None,
                 "win_good": float(df.filter(pl.col("index") >= 50)["won"].mean()) if (df["index"] >= 50).any() else None,
                 "win_bad": float(df.filter(pl.col("index") < 50)["won"].mean()) if (df["index"] < 50).any() else None}
 
@@ -495,11 +506,14 @@ def perf_section(player: str, my_replays: list[str], peers: dict[str, pl.DataFra
         mates = game.filter((pl.col("team") == r["team"]) & (pl.col("player_id") != player))
         matches.append({
             "replay": r["replay"], "date": r["date"], "won": bool(r["won"]), "index": r["index"],
+            "prod": r.get("prod"), "fond": r.get("fond"),
             "rank": ids.index(player) + 1, "n_players": len(ids),
             "comps": {k: r[f"c_{k}"] for k in KEYS},
             "peers": {pid: float(game.filter(pl.col("player_id") == pid)["index"][0]) for pid in peers if pid in ids},
             "mates": [{"name": m["player_name"], "index": m["index"]} for m in mates.iter_rows(named=True)],
             "opp_mean": float(game.filter(pl.col("team") != r["team"])["index"].mean()),
+            "opps": [{"name": o["player_name"], "index": o["index"]}
+                     for o in game.filter(pl.col("team") != r["team"]).iter_rows(named=True)],
         })
     last = me.tail(5)["index"].to_numpy()
     return {
@@ -508,8 +522,10 @@ def perf_section(player: str, my_replays: list[str], peers: dict[str, pl.DataFra
         "peers": {pid: summary(t.filter(pl.col("player_id") == pid)) for pid in peers},
         "lobby": summary(t.filter(~pl.col("player_id").is_in([player, *peers]))),
         "matches": matches,
-        "validation": {k: rep[k] for k in ("n_ref_player_matches", "n_ref_matches", "auc_player_oof",
-                                            "team_acc_oof", "theo_team_acc", "theo_n_matches")},
+        "validation": {k: rep.get(k) for k in ("n_ref_player_matches", "n_ref_matches", "auc_player_oof",
+                                                "team_acc_oof", "theo_team_acc", "theo_n_matches", "rlcs_team_acc",
+                                                "rlcs_team_acc_prod", "rlcs_team_acc_fond", "rlcs_n_matches",
+                                                "retest", "split_half", "version")},
     }
 
 
@@ -537,6 +553,65 @@ COMPOSITIONS = [
      [("touch.control_touch_count", "contrôle"), ("touch.medium_hit_count", "frappe moyenne"),
       ("touch.hard_hit_count", "frappe forte")]),
 ]
+
+
+SYN_KEYS = [  # clé, libellé, unité, sens (+1 plus haut = mieux, −1 plus bas = mieux, 0 style)
+    ("connexion", "Connexion", "% des touches reprises par l'autre", +1),
+    ("bonus", "Bonus par enchaînement", "pts de valeur en plus", +1),
+    ("double_commit", "Double commit", "s / 5 min", -1),
+    ("montes", "Montés ensemble sans couverture", "s / 5 min", -1),
+    ("ecart", "Écart moyen entre vous", "m", 0),
+]
+
+
+def _syn_agg(g: pl.DataFrame) -> dict:
+    T = g["play_s"].sum() / 300
+    ch = (g["chain_ab"] + g["chain_ba"]).sum()
+    return {"connexion": 100 * ch / max((g["n_a"] + g["n_b"]).sum(), 1),
+            "bonus": 100 * (g["chain_bonus_ab"] + g["chain_bonus_ba"]).sum() / max(ch, 1),
+            "double_commit": g["double_commit_s"].sum() / T, "montes": g["montes_ensemble_s"].sum() / T,
+            "ecart": g["ecart"].mean() / 100, "n_chains": int(ch)}
+
+
+def _syn_dir(g: pl.DataFrame, src: str) -> dict:
+    """Sens src → l'autre : part des touches de src reprises, bonus moyen par enchaînement."""
+    ab = g.filter(pl.col("a") == src); ba = g.filter(pl.col("b") == src)
+    n = ab["n_a"].sum() + ba["n_b"].sum(); ch = ab["chain_ab"].sum() + ba["chain_ba"].sum()
+    bonus = ab["chain_bonus_ab"].sum() + ba["chain_bonus_ba"].sum()
+    return {"sert": 100 * ch / max(n, 1), "bonus": 100 * bonus / max(ch, 1), "n": int(ch)}
+
+
+def synergy_section(player: str, my_replays: list[str], peers: dict[str, pl.DataFrame]) -> dict | None:
+    """Synergie par paire (voir rlpi.synergy), sur les parties retenues, face à « toi + un inconnu » et aux SSL."""
+    ft, fs = FEAT / "synergy_theo.parquet", FEAT / "synergy_ssl.parquet"
+    if not ft.exists() or not fs.exists():
+        return None
+    t = pl.read_parquet(ft).filter(pl.col("replay").is_in(my_replays))
+    mine = t.filter((pl.col("a") == player) | (pl.col("b") == player))
+    other = pl.when(pl.col("a") == player).then(pl.col("b")).otherwise(pl.col("a"))
+    mine = mine.with_columns(other.alias("mate"))
+    ref = {"ssl": _syn_agg(pl.read_parquet(fs))}
+    rnd = mine.filter(~pl.col("mate").is_in(list(peers)))
+    ref["random"] = _syn_agg(rnd) if rnd.height else None
+    ref["n_random"] = rnd["replay"].n_unique()
+    rng = np.random.default_rng(0)
+    pairs = {}
+    for pid in peers:
+        g = mine.filter(pl.col("mate") == pid)
+        if g.is_empty():
+            continue
+        reps = g["replay"].unique().to_list()
+        parts = {r: g.filter(pl.col("replay") == r) for r in reps}
+        bs = [_syn_agg(pl.concat([parts[r] for r in rng.choice(reps, len(reps))])) for _ in range(200)]
+        est = _syn_agg(g)
+        pairs[pid] = {"n": len(reps), "won": float(g["won"].mean()),
+                      "rows": [{"key": k, "label": lab, "unit": u, "sens": s, "v": est[k],
+                                "lo": float(np.percentile([b[k] for b in bs], 10)),
+                                "hi": float(np.percentile([b[k] for b in bs], 90)),
+                                "ssl": ref["ssl"][k], "random": ref["random"][k] if ref["random"] else None}
+                               for k, lab, u, s in SYN_KEYS],
+                      "me_to": _syn_dir(g, player), "to_me": _syn_dir(g, pid), "n_chains": est["n_chains"]}
+    return {"pairs": pairs, "n_random": ref["n_random"]}
 
 
 def compositions(groups: list[tuple[str, str, pl.DataFrame]]) -> list[dict]:
@@ -615,10 +690,34 @@ def heatmaps(player: str, my_replays: list[str], n_pro: int = 200, step: int = 5
             "n_touches": int(t.height)}
 
 
-def make_payload(player: str, compare_with: list[str] | None = None, since: str | None = None) -> dict:
-    theo = metrics(pl.read_parquet(FEAT / "player_match_stats_theo.parquet"))
-    if since:  # parties plus anciennes écartées (date du replay « AAAA-MM-JJ HH-MM-SS »)
-        theo = theo.filter(pl.col("date") >= since)
+@lru_cache(maxsize=1)
+def _theo_metrics(mtime: float) -> pl.DataFrame:
+    return metrics(pl.read_parquet(FEAT / "player_match_stats_theo.parquet"))
+
+
+def filter_games(df: pl.DataFrame, since: str | None = None, until: str | None = None,
+                 with_ids: list[str] | None = None, without_ids: list[str] | None = None) -> pl.DataFrame:
+    """Garde les parties dans la plage de dates (jours inclus) et selon la présence de joueurs."""
+    if since:  # date du replay « AAAA-MM-JJ HH-MM-SS »
+        df = df.filter(pl.col("date") >= since)
+    if until:
+        df = df.filter(pl.col("date") <= until + " 99")
+    keep = None
+    present = df.group_by("replay_file").agg(pl.col("player_id"))
+    for pid in with_ids or []:
+        ok = set(present.filter(pl.col("player_id").list.contains(pid))["replay_file"].to_list())
+        keep = ok if keep is None else keep & ok
+    for pid in without_ids or []:
+        ok = set(present.filter(~pl.col("player_id").list.contains(pid))["replay_file"].to_list())
+        keep = ok if keep is None else keep & ok
+    return df if keep is None else df.filter(pl.col("replay_file").is_in(list(keep)))
+
+
+def make_payload(player: str, compare_with: list[str] | None = None, since: str | None = None,
+                 until: str | None = None, with_ids: list[str] | None = None,
+                 without_ids: list[str] | None = None) -> dict:
+    theo = _theo_metrics((FEAT / "player_match_stats_theo.parquet").stat().st_mtime)
+    theo = filter_games(theo, since, until, with_ids, without_ids)
     me = theo.filter(pl.col("player_id") == player).sort("date")
     # Joueurs comparés : identifiants ou pseudos présents dans les parties de Théo
     peers = {}
@@ -657,6 +756,7 @@ def make_payload(player: str, compare_with: list[str] | None = None, since: str 
         "passes": passes_section(player, [Path(f).stem for f in me["replay_file"].to_list()], peers),
         "heat": heatmaps(player, [Path(f).stem for f in me["replay_file"].to_list()]),
         "perf": perf_section(player, [Path(f).stem for f in me["replay_file"].to_list()], peers),
+        "synergy": synergy_section(player, [Path(f).stem for f in me["replay_file"].to_list()], peers),
     }
     groups = [("me", payload["player"], me)]
     groups += [(pid, d["player_name"][-1], d) for pid, d in peers.items()]
@@ -670,8 +770,207 @@ def make_payload(player: str, compare_with: list[str] | None = None, since: str 
     payload["tech"] = tech_section(player, me, peers, theo)
     payload["record"] = [{"d": d, "w": bool(w), "s": f"{g}-{o}"}
                          for d, w, g, o in me.select("date", "won", "team_goals", "opp_goals").iter_rows()]
-    payload["since"] = since
+    payload["filters"] = {"since": since, "until": until, "with": with_ids or [], "without": without_ids or []}
+    my_replays = [Path(f).stem for f in me["replay_file"].to_list()]
+    payload["style"] = style_section(player, my_replays, peers)
+    payload["advice"] = advice_section(payload)
+    payload["progress"] = progress_section(payload)
     return payload
+
+
+# ------------------------------------------------------------------ style de jeu, conseils, progression
+@lru_cache(maxsize=1)
+def _styles_model(mtime: float) -> dict:
+    return json.loads((MODELS / "styles.json").read_text(encoding="utf-8"))
+
+
+@lru_cache(maxsize=1)
+def _theo_traits(mtime: float) -> pl.DataFrame:
+    from rlpi.styles import traits
+    return traits("theo")
+
+
+def _style_scores(S: dict, X: np.ndarray) -> np.ndarray:
+    """Traits moyens (n, T) → centile sur chaque style (n, n_styles)."""
+    Z = (X - np.array(S["mu"])) / np.array(S["sd"])
+    F = Z @ np.array(S["W"])
+    out = np.zeros((len(X), len(S["styles"])))
+    for j, st in enumerate(S["styles"]):
+        ref = np.asarray(st["ref_sorted"])
+        out[:, j] = 100 * np.searchsorted(ref, F[:, st["factor"]] * st["pole"], side="right") / len(ref)
+    return out
+
+
+def style_section(player: str, my_replays: list[str], peers: dict[str, pl.DataFrame]) -> dict | None:
+    """Style de jeu (voir rlpi.styles) : style principal et secondaire, ce qui le signe, pro le plus proche,
+    régularité du style d'un match à l'autre ; mêmes calculs pour les coéquipiers suivis."""
+    mp = MODELS / "styles.json"
+    if not mp.exists():
+        return None
+    S = _styles_model(mp.stat().st_mtime)
+    T = S["traits"]
+    tr = _theo_traits((FEAT / "player_match_stats_theo.parquet").stat().st_mtime).filter(pl.col("replay").is_in(my_replays))
+    W = np.array(S["W"])
+
+    stable = [j for j, st in enumerate(S["styles"]) if st["retest"] >= 0.5]
+
+    def scores(pid: str):
+        d = tr.filter(pl.col("player_id") == pid).drop_nulls(T)
+        if d.height < 5:  # moins de 5 parties : pas de style attribué
+            return None
+        X = d.select(T).to_numpy().astype(float)
+        return d.height, X, _style_scores(S, X.mean(0, keepdims=True))[0]
+
+    raw = {pid: scores(pid) for pid in [player, *peers]}
+    have = {pid: r for pid, r in raw.items() if r is not None}
+    # Style du trio : un style que tous les joueurs suivis partagent nettement (≥ 80) décrit l'équipe, pas l'individu
+    team = [j for j in stable if len(have) >= 2 and all(r[2][j] >= 80 for r in have.values())]
+    team_factors = {S["styles"][j]["factor"] for j in team}
+
+    def profile(pid: str) -> dict | None:
+        if pid not in have:
+            return None
+        n, X, pct = have[pid]
+        mean = X.mean(0, keepdims=True)
+        ok = [j for j in stable if S["styles"][j]["factor"] not in team_factors] or stable
+        order = sorted(ok, key=lambda j: -pct[j])
+        main = order[0]
+        second = next((j for j in order[1:] if S["styles"][j]["factor"] != S["styles"][main]["factor"]), None)
+        per_match = _style_scores(S, X)
+        top2 = np.argsort(-np.where(np.isin(np.arange(len(pct)), ok), per_match, -1), axis=1)[:, :2]
+        regular = int((top2 == main).any(axis=1).sum())
+        d = X
+        # signature : les traits les plus marqués face aux joueurs de référence
+        sig = []
+        for i, t in enumerate(T):
+            ref = np.asarray(S["trait_sorted"][t])
+            p = float(100 * np.searchsorted(ref, mean[0, i], side="right") / len(ref))
+            sig.append({"t": t, "pct": p, "txt": S["trait_fr"][t][0 if p >= 50 else 1]})
+        # d'abord les traits qui portent ton style principal et secondaire (dans leur sens), hors traits du trio
+        L = np.array(S["loadings"])
+        team_tr = {T[i] for f_ in team_factors for i in range(len(T)) if abs(L[i, f_]) >= 0.4}
+        mine = {}
+        for j in [main, second]:
+            if j is None:
+                continue
+            stj = S["styles"][j]
+            for i, t in enumerate(T):
+                l = L[i, stj["factor"]] * stj["pole"]
+                if abs(l) >= 0.4 and t not in team_tr:
+                    mine[t] = l
+        cand = [x for x in sig if x["t"] in mine and (x["pct"] - 50) * mine[x["t"]] > 0]
+        rest = [x for x in sig if x["t"] not in team_tr and x not in cand]
+        sig = (sorted(cand, key=lambda x: -abs(x["pct"] - 50)) + sorted(rest, key=lambda x: -abs(x["pct"] - 50)))[:4]
+        f = (mean - np.array(S["mu"])) / np.array(S["sd"]) @ W
+        pros = sorted(S["pros"], key=lambda p: float(np.linalg.norm(np.asarray(p["s"]) - f[0])))[:3]
+        return {"n": n, "main": main, "second": second, "pct": pct.tolist(), "regular": regular,
+                "signature": sig, "like": [{"name": p["name"], "n": p["n"]} for p in pros],
+                "polyvalent": bool(pct[main] < 65)}
+
+    styles = [{k: st[k] for k in ("name", "tagline", "trap", "factor", "pole", "retest")} for st in S["styles"]]
+    return {"styles": styles, "me": profile(player), "peers": {pid: profile(pid) for pid in peers},
+            "team": team, "n_ref": S["n_ref"], "n_rlcs": S["n_rlcs"]}
+
+
+COMP_ADVICE = {
+    "impact": ("Tes touches rapportent peu", "Avant chaque touche, choisis où la balle doit aller : un coin, un coéquipier, le cadre. Une touche « pour toucher » ne rapporte rien."),
+    "boost": ("Tu tombes trop souvent à sec", "Prends un grand pad pendant chaque rotation retour, et garde 30 de boost avant de sauter sur un ballon."),
+    "vitesse": ("Tu joues trop lentement", "Enchaîne les flips et garde la pleine vitesse entre deux actions : arriver vite, c'est choisir avant l'adversaire."),
+    "collectif": ("Tes passes trouvent peu preneur", "Avant de centrer, vérifie qu'un coéquipier suit ; le receveur annonce « je suis là »."),
+    "duels": ("Tu perds tes 50/50", "Arrive avec du boost et saute un peu plus tôt : un 50/50 se gagne sur l'élan et le contact franc."),
+    "placement": ("Ton placement s'écarte de celui d'un pro", "En 2e homme, reste à hauteur du ballon côté opposé ; en 3e, centré, devant ton but."),
+    "fiabilite": ("Tu rates des ballons", "Ralentis avant les touches qui comptent : mieux vaut une touche propre qu'une frappe forte ratée."),
+}
+TECH_ADVICE = {
+    "t_speed": "Ta vitesse moyenne est sous celle de tes lobbies : enchaîne les flips au sol et ne lâche pas l'accélérateur entre deux actions.",
+    "t_sup": "Tu atteins rarement la pleine vitesse : boost en ligne droite jusqu'au supersonique, puis entretiens-la sans boost (le supersonique se garde).",
+    "t_slow": "Tu passes beaucoup de temps lent : après chaque action, relance-toi immédiatement vers ta prochaine position.",
+    "t_highair": "Tu montes peu en l'air : 10 minutes par jour de pack d'entraînement aérien suffisent à progresser vite.",
+    "t_haer": "Tu joues peu de ballons hauts : travaille les aériens rapides (saut, flip-reset du saut, boost) en partie libre.",
+    "t_aer": "Tu joues peu de ballons en l'air : vise les ballons à hauteur de voiture en sautant plutôt qu'en attendant qu'ils tombent.",
+    "t_wall": "Tu joues peu les murs : les balles au mur sont des passes gratuites, va les chercher.",
+    "t_awhiff": "Tu rates des aériens : sors plus tôt mais moins vite, et vise le centre de la balle plutôt que d'aller fort.",
+    "t_beaten": "Tu arrives souvent second sur la balle : anticipe où elle va être plutôt que de la suivre.",
+}
+
+
+ART = {"Voltigeur": "du", "Forteresse": "de la", "Harceleur": "du", "Ancre": "de l'", "Fer de lance": "du",
+       "Fusée": "de la", "Fiable": "du", "Tête brûlée": "de la", "Porteur": "du", "Meneur": "du"}
+
+
+def advice_section(payload: dict) -> list[dict]:
+    """Trois conseils : le levier qui coûte le plus de points d'indice, le retard technique le plus net face
+    aux lobbies, et le piège de ton style."""
+    out = []
+    pf = payload.get("perf")
+    if pf and pf.get("me"):
+        w = {c["key"]: c["weight"] for c in pf["components"]}
+        comps = pf["me"]["comps"]
+        cost = sorted(((w[k] * (50 - v), k) for k, v in comps.items() if k in COMP_ADVICE and w.get(k, 0) > 0.02), reverse=True)
+        if cost and cost[0][0] > 0:
+            k = cost[0][1]; t, txt = COMP_ADVICE[k]
+            out.append({"kind": "Indice", "title": t, "text": txt,
+                        "why": f"C'est la composante qui te coûte le plus de points d'indice ({round(comps[k])}/100, poids {round(100 * w[k])} %)."})
+    tech = payload.get("tech")
+    if tech:
+        gaps = []
+        for r in tech["rows"]:
+            if r["sens"] == 0 or r["lobby"] in (None, 0) or r["key"] not in TECH_ADVICE:
+                continue
+            rel = (r["me"] - r["lobby"]) / abs(r["lobby"]) * r["sens"]
+            gaps.append((rel, r))
+        gaps.sort(key=lambda x: x[0])
+        if gaps and gaps[0][0] < -0.08:
+            rel, r = gaps[0]
+            out.append({"kind": "Technique", "title": f"{r['label']} : sous tes lobbies", "text": TECH_ADVICE[r["key"]],
+                        "why": f"{round(abs(rel) * 100)} % {'de moins' if r['sens'] > 0 else 'de plus'} que les autres joueurs de tes parties."})
+    st = payload.get("style")
+    if st and st.get("me"):
+        main = st["styles"][st["me"]["main"]]
+        out.append({"kind": "Style", "title": f"Le piège {ART.get(main['name'], 'du')} {main['name']}".replace("de l' ", "de l'"), "text": main["trap"],
+                    "why": f"Ton style principal ressort dans {st['me']['regular']} de tes {st['me']['n']} parties."})
+    return out
+
+
+def progress_section(payload: dict, last: int = 20) -> dict | None:
+    """Évolution sur les `last` dernières parties : indice, sous-notes, composantes et technique ;
+    comparaison seconde moitié vs première moitié, intervalle 80 % par tirage des parties."""
+    pf = payload.get("perf")
+    if not pf or len(pf["matches"]) < 6:
+        return None
+    ms = pf["matches"][-last:]
+    n = len(ms); h = n // 2
+    rng = np.random.default_rng(0)
+    series = {"index": ("Indice", [m["index"] for m in ms], 1)}
+    if ms[0].get("prod") is not None:
+        series["prod"] = ("Production", [m["prod"] for m in ms], 1)
+        series["fond"] = ("Fondamentaux", [m["fond"] for m in ms], 1)
+    labels = {c["key"]: c["label"] for c in pf["components"]}
+    for k in labels:
+        series["c_" + k] = (labels[k], [m["comps"][k] for m in ms], 1)
+    dates = [m["date"] for m in ms]
+    for r in (payload.get("tech") or {}).get("rows", []):
+        if r["sens"] != 0 and len(r["matches"]) >= n and r["key"] != "t_speed":  # vitesse déjà comptée (composante)
+            series["t_" + r["key"]] = (r["label"], r["matches"][-n:], r["sens"])
+    changes = []
+    for key, (label, vals, sens) in series.items():
+        v = np.array([np.nan if x is None else x for x in vals], dtype=float)
+        a, b = v[:h], v[h:]
+        a, b = a[np.isfinite(a)], b[np.isfinite(b)]
+        if len(a) < 3 or len(b) < 3:
+            continue
+        sd = np.nanstd(v) or 1.0
+        d = (b.mean() - a.mean()) * sens
+        boots = [(rng.choice(b, len(b)).mean() - rng.choice(a, len(a)).mean()) * sens for _ in range(1000)]
+        lo, hi = np.percentile(boots, [10, 90])
+        changes.append({"key": key, "label": label, "before": float(a.mean()), "after": float(b.mean()), "delta": float(d),
+                        "effect": float(d / sd), "lo": float(lo), "hi": float(hi), "clear": bool(lo > 0 or hi < 0),
+                        "unit": "/100" if not key.startswith("t_") else next(r["unit"] for r in payload["tech"]["rows"] if "t_" + r["key"] == key),
+                        "headline": key in ("index", "prod", "fond")})
+    idx = np.array([m["index"] for m in ms], dtype=float)
+    roll = [float(np.mean(idx[max(0, i - 4):i + 1])) for i in range(n)]
+    return {"n": n, "half": h, "dates": dates, "index": idx.tolist(), "roll5": roll,
+            "won": [m["won"] for m in ms], "changes": changes}
 
 
 def build(players: list[str], out: Path, since: str | None = None) -> Path:

@@ -462,3 +462,215 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
   contre. Balle reste au centre (17 %) : la plus ouverte (5,5 % de buts de chaque côté). Coin arrière : si
   l'adversaire touche en premier (13 %), 25 % de buts contre.
 - Nous (14/11, 78 kickoffs) : balle dans leur coin arrière 18 % (pros 11 %), récupérée par eux 71 %.
+
+## 2026-11-14 — Filtres globaux du tableau de bord (partie serveur)
+
+- `rlpi.dashboard` : `filter_games()` (plage de dates jours inclus, parties avec / sans tel joueur) ;
+  `make_payload(..., since, until, with_ids, without_ids)`. Génération d'un profil 5 s → 2 s (centile vectorisé,
+  durées de jeu et stats mises en cache).
+- `src/rlpi/serve.py` : serveur local (127.0.0.1) qui sert `reports/` et génère `/tableau_de_bord.html` à la
+  demande : `?j=<id>&du=AAAA-MM-JJ&au=AAAA-MM-JJ&avec=<id>,<id>&sans=<id>`. Données passées au gabarit :
+  `{dynamic, default, order, names, days[{d,n}], filters, profiles{sel: payload}, error}`.
+- Pas encore branché : barre de filtres dans `dashboard_template.html`, en cours de refonte par une autre
+  session (UX/UI). `launch.json` toujours sur `http.server`.
+
+## 2026-11-14 — Synergie entre coéquipiers (`src/rlpi/synergy.py`, premier essai)
+
+- Mesures par paire et par partie (définitions en tête du fichier) : enchaînements A → B (≤ 3 s) et leur
+  « bonus » de valeur au-delà du ΔV moyen de chacun, double commit, montés ensemble, écart moyen.
+  Toutes les parties de Théo (45, pour avoir de quoi mesurer) et 299 SSL. IC 80 % par bootstrap sur les parties.
+- Connexion (part des touches suivies par le coéquipier) : Axe–LAinox 10,2 % [9,5–11,0] vs Axe avec un
+  inconnu 8,7 [8,0–9,4], lobbies 7,7, SSL 7,4 → vrai effet duo sur la connexion.
+- Mais bonus par enchaînement Axe–LAinox +0,2 pt [−1,8 ; +2,2] vs SSL +1,6 : plus de liaisons, pas plus de valeur.
+- Double commit plus fréquent dans les paires avec Rileq : 11,6 s / 5 min [10,3–12,8] (Axe–Rileq) et 11,0
+  (LAinox–Rileq) vs 9,3 Axe–LAinox, 9,2 SSL. Axe–LAinox montent ensemble 11,5 s / 5 min vs SSL 8,9.
+  Écart entre coéquipiers plus faible que SSL pour les 3 paires (3 250–3 390 vs 3 610 uu).
+- Victoires par paire non interprétables (anciens replays « mémorables » biaisés, petits effectifs).
+
+## 2026-11-14 — Synergie dans l'onglet « Mon trio »
+
+- `dashboard.synergy_section()` : métriques de `synergy_theo.parquet` restreintes aux parties retenues par les
+  filtres, IC 80 % (200 tirages), références « toi + inconnu » et paires SSL, sens « qui sert qui ».
+- Gabarit : bloc « Notre synergie » sous le face-à-face (bande 80 %, symbole du coéquipier, trait SSL, rond
+  toi + inconnu, verdict seulement si toute la bande est d'un côté), tableau « qui sert qui », fiche méthode
+  « Synergie entre coéquipiers ». Vérifié dans le navigateur pour LAinox et Rileq, aucune erreur console.
+- Sur les 12 parties du 14/11 : Axe–LAinox connexion 8,9 % (mieux que SSL), montés ensemble 11,4 s / 5 min
+  (moins bien) ; Axe–Rileq (5 parties) double commit 12,6 s et montés ensemble 10,5 s (moins bien).
+
+## 2026-11-14 — Fantôme pro (prototype, `src/rlpi/ghost.py` + `reports/fantome.html`)
+
+- Idée : rejouer une action de Théo vue de dessus avec, par-dessus, ce qu'un pro RLCS a fait dans la situation
+  la plus proche. Cible = touche d'Axe du 14/11 au plus gros regret (choix ≠ meilleur choix du modèle Q).
+- Recherche : touches RLCS dont la balle est à < 900 uu (repère du toucheur, + version retournée gauche/droite),
+  puis distance pondérée sur la situation 0,2 s avant : balle (pos., vit.), toucheur (pos., vit., boost),
+  2 coéquipiers et 3 adversaires triés par distance à la balle. Un exemple par match, 3 retenus.
+- Premier exemple : 14/11 01-06-55, 23,6 s — Axe joue latéral devant le but adverse (47 % des pros tirent).
+  8 179 touches RLCS présélectionnées (996 matchs). Plus proches : T7LM (tir, but, +0,48), risk. (tir, −0,16),
+  Nwpo (latéral, −0,19). Ressemblance 86–88 %. Balles alignées à 30 uu près au moment de la touche.
+- Page : superposé / côte à côte, ralenti, zoom action, barres « ce que font les pros ». Jetons ajoutés hors
+  kit : `--ghost`, `--opp`, `--pitch`, `--pitch-line`. Serveur d'aperçu `rapports-fantome` (port 8767).
+- À faire : choisir le moment depuis « Ce match », bouton RLCS/SSL, index de recherche pré-calculé, 3D plus tard.
+
+## 2026-11-14 — Indice de performance v2 et page « Les modèles »
+
+### Diagnostic de l'indice v1
+- Impact (56 % du poids) : un tiers de sa variance venait des seules touches de but (+1 forcé) ; corrélation
+  impact ~ buts 0,56. Fiabilité d'un match (test-retest, 207 pros RLCS, 27 matchs chacun) : indice 0,07,
+  impact 0,02 ; placement 0,21, boost 0,36, vitesse 0,41. Il fallait 51 matchs pour une moyenne fiable (0,8).
+- Moitiés d'un même match (minutes paires / impaires) : indice 0,22, impact 0,16-0,20 → la note d'un match
+  dépend de quelques grosses touches. Plafonner les touches (±0,05 à ±0,20) n'y change rien.
+- Variantes testées (poids appris sur SSL, évaluées sur RLCS jamais vu) : v1 85 % d'équipes gagnantes ;
+  sans les buts 73 % (mais un tir marqué ne vaut plus rien alors qu'un tir arrêté rapporte → écarté) ;
+  « xV » 79 % ; fondamentaux seuls 58 % mais 18 matchs suffisent.
+
+### Changements (`src/rlpi/perf.py` v2, `rlpi.value goals`)
+- Touche de but créditée de la valeur du modèle 0,2 s avant la ligne (médiane 0,75) au lieu de +1
+  (`data/features/goal_xv_{source}.parquet`). Poids : impact 49 %, boost 19 %, passes 13 %, vitesse 12 %,
+  50/50 5 %, placement 2 %, ratés 0 %.
+- Sous-notes Production (centile de l'impact) et Fondamentaux (6 autres composantes, poids appris sans
+  l'impact). Rapport : validation RLCS, test-retest, moitiés de match (`python -m rlpi.perf fiabilite`).
+- Résultats : équipe gagnante SSL 82 % (cv), RLCS 79 %, Théo 82 % (44) ; moitiés de match indice 0,26,
+  fondamentaux 0,49, production 0,16 ; parties pour une moyenne fiable : indice 50, fondamentaux 18,
+  production 208. Théo (12 parties du 14/11) : 45 (v1 : 47) · production 46 · fondamentaux 43.
+- Tableau de bord : sous-notes et « moyenne fiable vers N parties » (Ma forme, Ce match), fiche méthode mise à jour.
+
+### Page « Les modèles » (`python -m rlpi.models_page` → `reports/modeles.html`)
+- Générée depuis les rapports : lecture des replays, valeur, placement, choix à la touche, indice ; axes
+  pertinence / vérité / efficacité / fiabilité ; analyses descriptives ; ce qui reste à valider. Liée depuis l'accueil.
+
+## 2026-11-14 — Meilleur jeu calculé (`src/rlpi/bestplay.py` + `reports/meilleur_jeu.html`)
+
+- Retour de Théo sur le fantôme pro : superposer l'action d'un autre joueur n'est pas clair. Il veut voir le
+  meilleur jeu calculé pour SA situation. → nouvelle page qui ne montre que la scène de Théo.
+- Modèles appris sur 226 339 touches RLCS (1 000 matchs, 20 % des matchs tenus à part pour la validation) :
+  - P(direction | situation), 16 secteurs + contrôle : le secteur joué est « faisable » (≥ 3 %) dans 92 % des cas ;
+  - Q(situation, direction) avec couloir (adversaire le plus proche de la trajectoire), cadrage et coéquipier sur
+    la trajectoire : R² hors échantillon 0,37 (modèle à 5 actions de `decisions` : 0,27).
+- Piège corrigé : la direction lue 0,3 s après la touche et la force de la balle dépendent de l'issue (un tir
+  contré sort lentement / dévié). La 1re version recommandait « tir très fort » dans 3 défenseurs (Q = 0,73).
+  → direction lue à 0,1 s, force retirée de Q (on ne recommande qu'une direction).
+- Exemple (14/11 01-06-55, 23,6 s, même moment que le fantôme) : Théo envoie la balle vers la gauche (Q −0,47 ;
+  réel −0,85) ; meilleur jeu = droit au but, cadré (Q +0,13) ; écart 0,61.
+- Page : arrêt sur image à la décision, éventail coloré (mieux / moins bien que ton jeu), flèches « ton jeu » /
+  « meilleur jeu », balle bleue simulée (ligne droite + rebonds), positions idéales des coéquipiers (modèle de
+  placement), bascule « Meilleur jeu » / « Ce que tu as fait ». Le fantôme pro (`fantome.html`) reste en archive.
+- Limites : trajectoire simulée sans hauteur, voitures figées après la touche, pas de force recommandée,
+  pas encore de choix du moment depuis « Ce match » (`--rank N` en ligne de commande).
+- Question de Théo : « tirer, c'est peut-être impossible dans ma position ? » → oui. Au moment de la touche il est
+  entre la balle et le but adverse, orienté vers son camp (−148°) ; balle vers le but chez les pros dans cette
+  situation : 4 % (modèle), 7 % sur 399 situations RLCS semblables. Le seuil « faisable » à 3 % était trop bas.
+- Corrections : seuil 10 % (comme `decisions`), options 3–10 % affichées hachurées « rares », jamais recommandées ;
+  recommandation par grand secteur (22,5°, valeur moyenne du secteur) car l'argmax d'un angle exact tombe toujours
+  à la frontière de la zone faisable (130–135°, juste à côté du tir rare). Option `--at "date@t_s"`.
+- Nouveau verdict pour le moment 23,6 s : meilleur jeu réaliste = diagonale avant-gauche (20 % des pros, Q −0,21)
+  contre −0,46 pour Théo, écart 0,24 (et non 0,6). Toutes les options réalistes sont négatives : l'erreur est
+  surtout AVANT la touche (mauvais côté de la balle). Piste : « meilleure position d'approche » avant la touche.
+
+## 2026-11-14 — Meilleur jeu sur l'action entière (`src/rlpi/approach.py`, approche dans `bestplay.export`)
+
+- Demande de Théo : juger l'action entière, pas seulement la touche.
+- Modèle d'approche : position du FUTUR toucheur relative à la balle, 3,0 → 0,3 s avant la touche, à partir de la
+  balle, du temps restant, du boost, de 2 coéquipiers et 3 adversaires. 1,11 M approches RLCS (1 000 matchs,
+  20 % tenus à part). Écart médian 721 uu (base « décalage médian par instant » : 1 084) ; 249 uu à 0,3 s,
+  896 à 1,8 s, 1 368 à 3,0 s → approche montrée seulement de −1,8 s à −0,3 s.
+- Coût du placement : valeur (modèle `value_h5`) réelle vs « toi à la position idéale », le reste de la scène
+  identique ; vitesse et orientation rendues cohérentes avec le chemin idéal (sinon voiture placée devant la balle
+  mais filant vers son but → comparaison faussée).
+- Exemple 23,6 s : jusqu'à −0,9 s la position de Théo vaut autant ou plus que celle d'un pro (collé à la balle) ;
+  à −0,4 s un pro arrivant face au but vaudrait +0,12. Courbe de valeur : +0,84 juste avant la touche, ~0 après.
+  CORRECTION de l'entrée précédente : la situation n'était PAS mal engagée — c'était une grosse occasion ; toutes
+  les options ont un ΔV négatif parce qu'on part de très haut, et la touche de Théo en perd le plus.
+- Page : lecture depuis −4 s avec arrêt sur la touche, losange vide « où un pro serait » relié à Théo, courbe de
+  valeur synchronisée (orange = placement qui coûte, bleu = qui rapporte), cartes « 1 · L'approche » / « 2 · La touche ».
+
+## 2026-11-14 — Catégories RLPI masquées dans le tableau de bord
+
+- Constat : les catégories affichées (Boost mana, Speed, 50's, Précision, Agressivité, Placement) ne
+  correspondent ni à la grille 2020 (`config/criteres_rlpi.yaml`) ni aux modèles v2 ; Placement n'apparaissait
+  jamais (indicateurs tous « style ») ; notes = moyennes de centiles non reliées à la victoire.
+- Décision de Théo : ne plus les afficher en attendant une nouvelle grille. Interrupteur `SHOW_RLPI_CATS = false`
+  dans `dashboard_template.html` : le bloc de « Mon jeu » devient « Notes des modèles », le nom de catégorie
+  disparaît des lignes de « Tous les indicateurs » et de la fiche méthode. Calcul (`radar`) inchangé.
+- Piste de refonte : catégories par phase (Attaque, Collectif, Défense, Duels, Placement, Technique) + style non
+  noté. Pour juger des pros : référence par rôle, correction par l'adversaire, modèles de valeur plutôt que de
+  conformité ; à valider sur RLCS (stabilité entre moitiés de saison, lien avec la victoire, bon sens).
+
+## 2026-11-14 — Meilleur jeu : 4 actions + bug des tirs arrêtés
+
+- Bug trouvé en testant 3 autres actions : les 3 « pires » étaient des TIRS ARRÊTÉS 0,1 s plus tard. La liste des
+  touches suivantes excluait les arrêts (`touch_values` filtré sur action ≠ save) et la direction lue à i+1
+  incluait déjà la déviation du gardien → tir lu comme « balle jouée vers l'arrière ».
+- Correctif (`exit_dir`) : touche suivante cherchée parmi TOUTES les touches ; si elle arrive dès l'image suivante,
+  direction lue à l'image de la touche si la balle y a changé de vitesse (> 300 uu/s), sinon touche écartée
+  (Théo 208 / 8 509, RLCS 5 581 / 226 339). Modèles réentraînés : R² Q 0,34 ; secteur joué ≥ 10 % dans 69 % des cas.
+- Page : sélecteur d'actions (`meilleur_jeu.html?m=0..3`, `bestplay_data_N.js`, `bestplay_index.js`) et nature de la
+  touche : « duel » (adversaire < 250 uu de la balle), « touche probablement manquée » (direction jouée par < 5 %
+  des pros ici), sinon vrai choix.
+- Actions retenues : 01h06 23,6 s (occasion perdue, +0,25), 01h20 27,1 s (choix : arrière-gauche au lieu
+  d'avant-gauche, +0,27), 01h47 36,8 s (balle partie dans une direction jouée par 1 % des pros → exécution),
+  01h40 286,2 s (duel, adversaire à 214 uu, indicatif).
+
+## 2026-11-14 — Styles de jeu, conseils et progression (« Mon jeu »)
+
+- `src/rlpi/styles.py` : 30 traits par joueur-match (rôle, zones, aérien, murs, contrôle, contacts, 50/50, tirs,
+  arrêts, dégagements, passes, boost, vitesse, volume, pertes, ratés), **centrés sur la moyenne des 6 joueurs du
+  match** (sinon le niveau classé se confond avec le style). Moyenne par joueur : 207 pros RLCS (≥ 10 matchs) +
+  194 SSL (≥ 3). ACP + varimax, 7 facteurs. Pôles nommés par signature : Voltigeur, Forteresse / Harceleur,
+  Ancre / Fer de lance, Fusée, Fiable / Tête brûlée, Porteur, Meneur. Stabilité d'un pro entre matchs pairs et
+  impairs : 0,69 à 0,88 ; Porteur 0,30 et Meneur 0,35 → jamais style principal. `python -m rlpi.styles fit`
+  → `data/models/styles.json`. Premier essai sans centrage : les trois du trio sortaient « Harceleur » (effet du
+  classé) ; avec centrage, toujours Harceleur → c'est un style d'équipe : règle « style du trio » si tous ≥ 80.
+- Résultat (toutes parties) : trio Harceleur ; Axe Ancre + Fiable (comme Rezears, chaaneel.) ; LAinox Fer de lance
+  + Fusée ; Rileq Fer de lance + Fiable. Depuis le 14/11 : Rileq < 5 parties → pas de style.
+- `dashboard.style_section / advice_section / progress_section` + gabarit : hero « Ton style de jeu » (style,
+  teinte, signature en mots, pro le plus proche, affinités, styles du trio), 3 conseils (composante qui coûte le
+  plus d'indice, retard technique face aux lobbies, piège du style), progression (20 dernières parties : courbe,
+  moyenne glissante, plus fortes progressions et reculs, « net » si l'IC 80 % exclut 0). Fiches méthode ajoutées.
+  Vérifié dans le navigateur (Axe, LAinox, mobile 375 px), aucune erreur console.
+
+## 2026-11-14 — Formation à trois (`src/rlpi/formation.py`) à la place de l'approche joueur par joueur
+
+- Remarque de Théo (capture, action 1 à −0,6 s) : la position « idéale » de Théo tombait à 235 uu de LAinox. Les
+  positions idéales étaient calculées séparément (approche pour le toucheur, placement pour les autres) → trois
+  joueurs « idéaux » collés, pas une rotation.
+- Nouveau modèle : positions des 3 rôles d'une équipe RLCS (sur la balle / 2e / 3e = rangs de distance à la balle),
+  relatives à la balle, à partir de la balle et des adversaires seulement. 1,34 M situations (1 000 matchs, 20 %
+  tenus à part). Écart médian : 580 uu sur la balle (base 713), 1 696 pour le 2e (2 146), 2 521 pour le 3e (3 939).
+  Prédictions trop resserrées (écart minimal médian 1 200 uu contre 2 025 réel) → écart minimal imposé de 1 000 uu.
+- Attribution des rôles : déplacement minimal, rôle « sur la balle » pondéré ×3 (sinon le joueur le plus loin était
+  envoyé sur la balle — Rileq à 4 400 uu au fond du but adverse dans l'action 4), pénalité de changement de rôle
+  (Viterbi). Balle « disputée » si les deux mieux placés sont à < 300 uu d'écart.
+- Valeur : les 3 joueurs déplacés (vitesse et orientation cohérentes) vs réel.
+- Résultats : action 1 → balle pour Zernica (le plus proche), Théo 2e, LAinox 3e, formation +0,16 à −1,0 s ;
+  action 2 → balle pour Théo, +0,31 à −3,1 s ; actions 3 et 4 → balle disputée (Rileq / Théo, LAinox / Théo).
+- `approach.py` n'est plus utilisé par la page (gardé pour mémoire).
+- Retour de Théo : « le premier joueur est marqué balle déjà » + voir la trajectoire pro dès le début. Diagnostic :
+  au début de l'action 1, Théo conduit la balle le long du mur (450 uu) → rôle « sur la balle » juste, mais le
+  contour + l'étiquette « BALLE » collés sur sa voiture donnaient l'impression d'un rôle décidé d'avance.
+  Page : trajectoires pro de chaque joueur tracées dès −4 s (pointillé de sa couleur, lissées sur 0,5 s, coupées
+  aux changements de rôle) ; contour, lien et étiquette affichés seulement si le joueur est à > 350 uu de sa
+  position pro ; cadre élargi aux trajectoires entières.
+
+## 2026-11-14 — Meilleur jeu limité aux 5 pires actions des 10 dernières parties
+
+- Décision de Théo : la visualisation n'est proposée que pour les 5 pires actions des 10 dernières parties.
+- `python -m rlpi.bestplay worst --games 10 --k 5` : pire = plus grand écart touche jouée ↔ meilleur jeu réaliste ;
+  duels écartés (adversaire < 250 uu de la balle), une seule touche par action (< 3 s dans la même partie).
+  Écrit `reports/bestplay_data_0..4.js` + `bestplay_index.js` (liste + méta) ; la page affiche la phrase de sélection.
+- Résultat (10 parties du 14/11, 00h36 → 01h47 ; 1 duel écarté) : 01h47 36,8 s (+0,35, touche manquée ?),
+  00h50 151,6 s (+0,34, touche manquée ?), 01h20 27,1 s (+0,27, choix), 01h06 23,6 s (+0,25, balle d'un coéquipier),
+  00h36 174,2 s (+0,24, balle d'un coéquipier).
+- À chaque nouvelle session : `bestplay extract --source theo` (après `decisions touches-theo`) puis `bestplay worst`.
+
+## 2026-11-15 — Mise en ligne chez Lainox (Coolify)
+
+- Même circuit que Football PVP : push sur `main` → GitHub Action `.github/workflows/deploy.yml` construit l'image
+  `ghcr.io/therealaxe/rlpi` (`:latest` et `:sha-…`) → appel de l'API Coolify pour redéployer (port 3001).
+- Secrets GitHub à créer (fournis par Luc) : `COOLIFY_TOKEN` (permission « deploy ») et `COOLIFY_APP_UUID`.
+- L'image ne contient que le serveur (`python -m rlpi.serve`), pas les données. Les données vivent dans un volume
+  persistant monté sur `/app/data` (pages statiques dans `/app/data/reports`), envoyées à Luc à part.
+- `serve.py` : hôte, port et dossier des rapports réglables par variables d'environnement (`RLPI_HOST`, `PORT`,
+  `RLPI_REPORTS`, `RLPI_SINCE`) ; route `/health` ajoutée. Sans variables, comportement local inchangé.
+- Fichiers lus par le tableau de bord (≈ 294 Mo) : `data/features/*` utilisés, `data/models/{perf_report,styles,
+  value_h5_report}.json`, `data/frames/theo/`, et dans `data/frames/rlcs/` tous les `.meta.json` + 200 parquets
+  (échantillon des heatmaps).

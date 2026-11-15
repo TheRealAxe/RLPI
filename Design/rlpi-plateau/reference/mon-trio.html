@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mon trio · RLPI Plateau</title>
+<link rel="stylesheet" href="../design/tokens.css">
+<link rel="stylesheet" href="../design/plateau.css">
+<style>
+body{margin:0;background:var(--surface)}
+*{box-sizing:border-box}
+.ref{width:960px;margin:0 auto;padding:26px 30px}
+svg text{font-family:var(--font-sans);font-size:11px;font-weight:700;fill:var(--ink-muted)}
+
+</style>
+</head>
+<body class="pl-page">
+
+<div class="ref"><nav style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px" aria-label="Sections du profil">
+<div style="display:flex;gap:4px"><a href="ce-match.html" class="pl-cut pl-tag" style="text-decoration:none;padding:9px 26px;color:var(--ink-muted);background:var(--surface-alt)">Ce match</a><a href="ma-forme.html" class="pl-cut pl-tag" style="text-decoration:none;padding:9px 26px;color:var(--ink-muted);background:var(--surface-alt)">Ma forme</a><a href="mon-jeu.html" class="pl-cut pl-tag" style="text-decoration:none;padding:9px 26px;color:var(--ink-muted);background:var(--surface-alt)">Mon jeu</a><a href="mon-trio.html" class="pl-cut pl-tag" style="text-decoration:none;padding:9px 26px;background:var(--panel);color:var(--panel-ink)">Mon trio</a></div>
+<div class="pl-small pl-muted" style="display:flex;gap:16px"><span>Joueur <b style="color:var(--ink)">Axe ▾</b></span><span>Comparer à <b style="color:var(--ink)">SSL ▾</b></span><a href="#methode" style="color:var(--ink);font-weight:700">Méthode ⓘ</a></div></nav>
+<div style="display:flex;align-items:stretch;gap:0;margin-bottom:20px">
+<div class="pl-cut pl-tag" style="background:var(--accent);color:var(--on-accent);padding:10px 26px 10px 20px;display:flex;align-items:center">RLPI</div>
+<div class="pl-cut pl-panel" style="padding:6px 30px 4px 24px;margin-left:-6px;display:flex;align-items:center"><span class="pl-dx" style="font-size:40px">Axe</span></div>
+<div class="pl-tag" style="display:flex;align-items:center;padding-left:16px;color:var(--ink-muted)">Face à face · 12 parties</div></div>
+<div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:end;margin-bottom:10px">
+ <div style="text-align:right;padding-right:18px"><div class="pl-tag" style="color:var(--accent)">◆ Toi</div><div class="pl-dx" style="font-size:64px;white-space:nowrap">Axe <span style="color:var(--accent)">47</span></div></div>
+ <div style="text-align:center"><span class="pl-dx" style="font-size:40px;color:var(--ink-muted)">vs</span></div>
+ <div style="padding-left:18px"><div class="pl-tag" style="color:var(--mate-1)">● Coéquipier</div><div class="pl-dx" style="font-size:64px;white-space:nowrap"><span style="color:var(--mate-1)">54</span> LAinox</div></div>
+</div>
+<div style="border-top:3px solid var(--ink)"><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;">51,4 %</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink-muted);font-size:13px">Boost moyen · style</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;">47,1 %</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;">11,2 %</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Temps à 0 boost</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--mate-1)">11,1 %</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--accent)">7,0</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Boost volé / 5 min</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;">6,1</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;">53,5 km/h</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Vitesse moyenne</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--mate-1)">55,6 km/h</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;">10,5 %</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Temps supersonique</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--mate-1)">15,8 %</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--accent)">52,6 %</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">50/50 gagnés</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;">45,5 %</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;">2,9</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Tirs / 5 min</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--mate-1)">3,2</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;">0,86</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Buts / 5 min</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--mate-1)">1,0</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;">5,1</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Passes réussies / 5 min</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--mate-1)">6,3</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--accent)">1,9</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Balles ratées / 5 min</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;">3,0</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;">0,71</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Démos / 5 min</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--mate-1)">0,95</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;">22</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Placement hors ballon</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--mate-1)">34</span></div></div><div style="display:grid;grid-template-columns:1fr 300px 1fr;align-items:center;border-bottom:1px solid var(--rule)">
+<div style="text-align:right;padding:6px 18px"><span class="pl-dx" style="font-size:26px;color:var(--accent)">35</span></div>
+<div class="pl-tag" style="text-align:center;color:var(--ink);font-size:13px">Choix à la touche</div>
+<div style="padding:6px 18px"><span class="pl-dx" style="font-size:26px;">27</span></div></div></div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+ <span style="font-size:15px;font-weight:500">Tu gagnes 4 duels sur 12 : les 50/50, le boost volé, la propreté et le choix à la touche. LAinox va plus vite et finit plus.</span>
+ <span class="pl-tag" style="white-space:nowrap;margin-left:20px">Changer : <span style="color:var(--mate-2)">■ Rileq</span></span></div>
+</div>
+
+</body>
+</html>

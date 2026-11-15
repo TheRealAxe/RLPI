@@ -232,14 +232,42 @@ def touches(source: str, horizon: int) -> None:
     print(f"→ {out.height:,} touches valorisées ({source}), ΔV moyen {out['dv'].mean():+.4f}")
 
 
+def goal_values(source: str, horizon: int = 5) -> None:
+    """Valeur du modèle 0,2 s avant que la balle franchisse la ligne, pour chaque but (vue de l'équipe 0).
+    Sert à créditer une touche de but comme un tir (« xV ») au lieu du +1 / −1 forcé."""
+    import lightgbm as lgb
+
+    booster = lgb.Booster(model_file=str(MODELS / f"value_h{horizon}.txt"))
+    rows = []
+    for mp in sorted((FRAMES / source).glob("*.meta.json")):
+        m, f = load_replay(mp)
+        if not m["goals"]:
+            continue
+        ph = f["phase"].to_numpy()
+        idx = []
+        for g in m["goals"]:
+            j = g["i"] - 1
+            while j > 0 and ph[j] != 1:
+                j -= 1
+            idx.append(max(j - 2, 0))
+        p = {t: booster.predict(features(f, t, labels_and_score(m, f.height, t, horizon)[1])[idx]) for t in (0, 1)}
+        rows += [{"replay": m["replay"], "goal_i": g["i"], "scorer_team": g["team"], "v_team0": float(p[0][k] - p[1][k])}
+                 for k, g in enumerate(m["goals"])]
+    pl.DataFrame(rows).write_parquet(FEATURES / f"goal_xv_{source}.parquet")
+    print(f"→ goal_xv_{source}.parquet : {len(rows)} buts")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("train"); s.add_argument("--horizon", type=int, default=10)
     s = sub.add_parser("touches"); s.add_argument("--source", required=True); s.add_argument("--horizon", type=int, default=10)
+    s = sub.add_parser("goals"); s.add_argument("--source", required=True); s.add_argument("--horizon", type=int, default=5)
     a = ap.parse_args()
     if a.cmd == "train":
         train(a.horizon)
+    elif a.cmd == "goals":
+        goal_values(a.source, a.horizon)
     else:
         touches(a.source, a.horizon)
 

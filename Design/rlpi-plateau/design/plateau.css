@@ -1,0 +1,75 @@
+/* RLPI · Plateau — classes de base. Charger après tokens.css.
+   Ces classes décrivent la grammaire visuelle ; les reproduire dans le
+   système de composants du projet (CSS modules, Tailwind, styled…) est attendu. */
+
+/* --- Page --------------------------------------------------------------- */
+.pl-page {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+.pl-page :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* --- Typographie -------------------------------------------------------- */
+/* .pl-dx : la voix « plateau » sans taille imposée (noms, scores). */
+.pl-dx { font-family: var(--font-display); font-style: italic; font-weight: 900; text-transform: uppercase; line-height: .85; }
+.pl-score-xl, .pl-score, .pl-name, .pl-title {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 900;
+  line-height: .85;
+}
+.pl-score-xl { font-size: 150px; }
+.pl-score    { font-size: 44px; }
+.pl-name     { font-size: 40px; text-transform: uppercase; }
+.pl-title    { font-size: 28px; text-transform: uppercase; line-height: .9; }
+.pl-body     { font-size: 15px; line-height: 22px; font-weight: 500; }
+.pl-small    { font-size: 13px; line-height: 18px; font-weight: 500; }
+.pl-tag      { font-size: 12px; line-height: 16px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.pl-muted    { color: var(--ink-muted); }
+
+/* --- Coupes en biais ---------------------------------------------------- */
+/* Parallélogramme : bandeaux, pavés de forme, onglets. */
+.pl-cut  { clip-path: polygon(var(--cut-md) 0, 100% 0, calc(100% - var(--cut-md)) 100%, 0 100%); }
+/* Biais à droite seulement : cartons de contenu. */
+.pl-cutr { clip-path: polygon(0 0, 100% 0, calc(100% - var(--cut-lg)) 100%, 0 100%); }
+/* Un élément coupé perd son outline : pour le focus, l'entourer d'un parent non coupé. */
+
+/* --- Cartons ------------------------------------------------------------ */
+.pl-panel { background: var(--panel); color: var(--panel-ink); }
+.pl-panel .pl-muted { color: var(--panel-muted); }
+
+/* --- Volt (une seule zone par écran) ------------------------------------ */
+.pl-volt { background: var(--accent); color: var(--on-accent); }
+
+/* --- Bandeau de titre --------------------------------------------------- */
+.pl-header { display: flex; align-items: stretch; }
+.pl-header > .pl-volt  { padding: 10px 26px 10px 20px; display: flex; align-items: center; }
+.pl-header > .pl-panel { padding: 6px 30px 4px 24px; margin-left: -6px; display: flex; align-items: center; }
+
+/* --- Pavé de forme (un match) ------------------------------------------- */
+.pl-form { padding: 6px 12px 8px 16px; text-align: center; }
+.pl-form--up   { background: var(--good); color: #fff; }
+.pl-form--down { background: var(--bad);  color: var(--panel-ink); }
+.pl-form--current { outline: 3px solid var(--accent); outline-offset: -3px; }
+
+/* --- Lignes de classement ----------------------------------------------- */
+.pl-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--rule); }
+
+/* --- Face-à-face -------------------------------------------------------- */
+.pl-tape { display: grid; grid-template-columns: 1fr 300px 1fr; align-items: center; border-bottom: 1px solid var(--rule); }
+.pl-tape__left  { text-align: right; padding: 6px 18px; }
+.pl-tape__right { padding: 6px 18px; }
+.pl-tape__label { text-align: center; }
+.pl-win--me   { color: var(--me); }
+.pl-win--mate { color: var(--mate-1); }
+
+/* --- Valeurs ------------------------------------------------------------ */
+.pl-good { color: var(--good-on-dark); }
+.pl-panel .pl-good { color: var(--good); }
+.pl-bad  { color: var(--bad); }
+.pl-panel .pl-bad { color: var(--bad-ink); }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

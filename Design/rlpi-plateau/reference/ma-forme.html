@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ma forme · RLPI Plateau</title>
+<link rel="stylesheet" href="../design/tokens.css">
+<link rel="stylesheet" href="../design/plateau.css">
+<style>
+body{margin:0;background:var(--surface)}
+*{box-sizing:border-box}
+.ref{width:960px;margin:0 auto;padding:26px 30px}
+svg text{font-family:var(--font-sans);font-size:11px;font-weight:700;fill:var(--ink-muted)}
+
+</style>
+</head>
+<body class="pl-page">
+
+<div class="ref"><nav style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px" aria-label="Sections du profil">
+<div style="display:flex;gap:4px"><a href="ce-match.html" class="pl-cut pl-tag" style="text-decoration:none;padding:9px 26px;color:var(--ink-muted);background:var(--surface-alt)">Ce match</a><a href="ma-forme.html" class="pl-cut pl-tag" style="text-decoration:none;padding:9px 26px;background:var(--panel);color:var(--panel-ink)">Ma forme</a><a href="mon-jeu.html" class="pl-cut pl-tag" style="text-decoration:none;padding:9px 26px;color:var(--ink-muted);background:var(--surface-alt)">Mon jeu</a><a href="mon-trio.html" class="pl-cut pl-tag" style="text-decoration:none;padding:9px 26px;color:var(--ink-muted);background:var(--surface-alt)">Mon trio</a></div>
+<div class="pl-small pl-muted" style="display:flex;gap:16px"><span>Joueur <b style="color:var(--ink)">Axe ▾</b></span><span>Comparer à <b style="color:var(--ink)">SSL ▾</b></span><a href="#methode" style="color:var(--ink);font-weight:700">Méthode ⓘ</a></div></nav>
+<div style="display:flex;align-items:stretch;gap:0;margin-bottom:20px">
+<div class="pl-cut pl-tag" style="background:var(--accent);color:var(--on-accent);padding:10px 26px 10px 20px;display:flex;align-items:center">RLPI</div>
+<div class="pl-cut pl-panel" style="padding:6px 30px 4px 24px;margin-left:-6px;display:flex;align-items:center"><span class="pl-dx" style="font-size:40px">Axe</span></div>
+<div class="pl-tag" style="display:flex;align-items:center;padding-left:16px;color:var(--ink-muted)">Profil · 12 parties classées 3v3 · 14.11.26</div></div>
+<div style="display:grid;grid-template-columns:300px 1fr;gap:20px">
+ <div class="pl-panel pl-cutr" style="padding:18px 34px 18px 22px">
+  <div class="pl-tag" style="color:var(--panel-muted)">Indice de performance</div>
+  <div style="display:flex;align-items:flex-end;gap:6px"><span class="pl-dx" style="font-size:150px">47</span><span class="pl-dx" style="font-size:30px;color:var(--panel-muted);padding-bottom:10px">/100</span></div>
+  <div style="font-size:15px;font-weight:500;margin-top:6px">Dans la moyenne de tes parties.<br>Fourchette 37–57 · 5 dernières : 49.</div>
+ </div>
+ <div>
+  <div class="pl-tag" style="color:var(--ink-muted);margin-bottom:6px">Ton trio et tes lobbies</div><div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--rule)">
+<svg width="14" height="14"><circle cx="7" cy="7" r="6" style="fill:var(--mate-1)"/></svg>
+<span class="pl-dx" style="font-size:26px;flex:1">LAinox</span><span class="pl-dx" style="font-size:34px">54</span></div><div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--rule)">
+<svg width="14" height="14"><rect x="1" y="1" width="12" height="12" style="fill:var(--mate-2)"/></svg>
+<span class="pl-dx" style="font-size:26px;flex:1">Rileq</span><span class="pl-dx" style="font-size:34px">45</span></div><div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--rule)">
+<svg width="14" height="14"><rect x="1" y="5" width="12" height="4" style="fill:var(--ref)"/></svg>
+<span class="pl-dx" style="font-size:26px;flex:1">Lobbies</span><span class="pl-dx" style="font-size:34px">47</span></div>
+  <div style="display:flex;justify-content:space-between;margin:18px 0 8px"><span class="pl-tag" style="color:var(--ink-muted)">Forme · 12 parties</span><span class="pl-tag">7 V · 5 D · <span style="color:var(--good-on-dark)">5 au-dessus de 50</span></span></div>
+  <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px"><div class="pl-cut" style="background:var(--good);color:#ffffff;padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">D</div><div class="pl-dx" style="font-size:34px">72</div></div><div class="pl-cut" style="background:var(--good);color:#ffffff;padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">V</div><div class="pl-dx" style="font-size:34px">60</div></div><div class="pl-cut" style="background:var(--bad);color:var(--panel-ink);padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">V</div><div class="pl-dx" style="font-size:34px">46</div></div><div class="pl-cut" style="background:var(--bad);color:var(--panel-ink);padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">V</div><div class="pl-dx" style="font-size:34px">40</div></div><div class="pl-cut" style="background:var(--bad);color:var(--panel-ink);padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">D</div><div class="pl-dx" style="font-size:34px">27</div></div><div class="pl-cut" style="background:var(--good);color:#ffffff;padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">V</div><div class="pl-dx" style="font-size:34px">68</div></div><div class="pl-cut" style="background:var(--bad);color:var(--panel-ink);padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">V</div><div class="pl-dx" style="font-size:34px">9</div></div><div class="pl-cut" style="background:var(--bad);color:var(--panel-ink);padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">D</div><div class="pl-dx" style="font-size:34px">47</div></div><div class="pl-cut" style="background:var(--good);color:#ffffff;padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">V</div><div class="pl-dx" style="font-size:34px">91</div></div><div class="pl-cut" style="background:var(--good);color:#ffffff;padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">V</div><div class="pl-dx" style="font-size:34px">79</div></div><div class="pl-cut" style="background:var(--bad);color:var(--panel-ink);padding:6px 12px 8px 16px;text-align:center;">
+<div class="pl-tag" style="font-size:11px">D</div><div class="pl-dx" style="font-size:34px">18</div></div><div class="pl-cut" style="background:var(--bad);color:var(--panel-ink);padding:6px 12px 8px 16px;text-align:center;outline:3px solid var(--accent);outline-offset:-3px">
+<div class="pl-tag" style="font-size:11px">D</div><div class="pl-dx" style="font-size:34px">9</div></div></div>
+ </div>
+</div>
+<div style="display:flex;align-items:stretch;margin-top:24px">
+ <div class="pl-cut pl-tag" style="background:var(--accent);color:var(--on-accent);padding:12px 28px 12px 20px;display:flex;align-items:center">À revoir</div>
+ <div class="pl-cut pl-panel" style="flex:1;margin-left:-6px;padding:10px 30px 10px 24px;display:flex;align-items:center;gap:20px">
+  <span class="pl-dx" style="font-size:30px">14.11 · Défaite</span><span class="pl-dx" style="font-size:44px;color:var(--bad-ink)">9</span>
+  <span style="font-size:15px;font-weight:500;flex:1">6e sur 6. L’impact de tes touches (56 % de la note) tombe à 8/100.</span>
+  <span class="pl-tag">Voir le replay ▸</span></div>
+</div></div>
+
+</body>
+</html>

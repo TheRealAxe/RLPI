@@ -1,0 +1,836 @@
+{
+ "_note": "Exemple relevé sur la capture du profil d'Axe (14/11/2026). Forme proposée : à adapter au modèle de données existant de l'app.",
+ "player": {
+  "id": "axe",
+  "name": "Axe"
+ },
+ "teammates": [
+  {
+   "id": "lainox",
+   "name": "LAinox",
+   "slot": "mate-1"
+  },
+  {
+   "id": "rileq",
+   "name": "Rileq",
+   "slot": "mate-2"
+  }
+ ],
+ "scope": {
+  "games": 12,
+  "mode": "3v3 classé",
+  "from": "2026-11-14",
+  "to": "2026-11-14",
+  "reference": {
+   "id": "ssl",
+   "label": "SSL",
+   "players": 723,
+   "matches": 301
+  }
+ },
+ "index": {
+  "value": 47,
+  "low": 37,
+  "high": 57,
+  "last5": 49,
+  "verdict": "Dans la moyenne de tes parties",
+  "teammates": {
+   "lainox": 54,
+   "rileq": 45
+  },
+  "lobbies": 47
+ },
+ "matches": [
+  {
+   "n": 1,
+   "date": "2026-11-14",
+   "result": "D",
+   "index": 72
+  },
+  {
+   "n": 2,
+   "date": "2026-11-14",
+   "result": "V",
+   "index": 60
+  },
+  {
+   "n": 3,
+   "date": "2026-11-14",
+   "result": "V",
+   "index": 46
+  },
+  {
+   "n": 4,
+   "date": "2026-11-14",
+   "result": "V",
+   "index": 40
+  },
+  {
+   "n": 5,
+   "date": "2026-11-14",
+   "result": "D",
+   "index": 27
+  },
+  {
+   "n": 6,
+   "date": "2026-11-14",
+   "result": "V",
+   "index": 68
+  },
+  {
+   "n": 7,
+   "date": "2026-11-14",
+   "result": "V",
+   "index": 9
+  },
+  {
+   "n": 8,
+   "date": "2026-11-14",
+   "result": "D",
+   "index": 47
+  },
+  {
+   "n": 9,
+   "date": "2026-11-14",
+   "result": "V",
+   "index": 91
+  },
+  {
+   "n": 10,
+   "date": "2026-11-14",
+   "result": "V",
+   "index": 79
+  },
+  {
+   "n": 11,
+   "date": "2026-11-14",
+   "result": "D",
+   "index": 18
+  },
+  {
+   "n": 12,
+   "date": "2026-11-14",
+   "result": "D",
+   "index": 9
+  }
+ ],
+ "kpis": [
+  {
+   "id": "wins",
+   "label": "Victoires",
+   "value": 58,
+   "unit": "%",
+   "detail": "7 V · 5 D"
+  },
+  {
+   "id": "rank",
+   "label": "Rang dans la partie",
+   "value": 3.6,
+   "unit": "/6",
+   "lowerIsBetter": true,
+   "teammates": {
+    "lainox": 3.4,
+    "rileq": 3.6
+   }
+  },
+  {
+   "id": "placement",
+   "label": "Placement hors ballon",
+   "value": 22,
+   "unit": "/100",
+   "vs": "pros RLCS",
+   "teammates": {
+    "lainox": 34,
+    "rileq": 52
+   }
+  },
+  {
+   "id": "touchResult",
+   "label": "Résultat de tes touches",
+   "value": 50,
+   "unit": "/100",
+   "vs": "lobbies",
+   "teammates": {
+    "lainox": 50,
+    "rileq": 56
+   }
+  },
+  {
+   "id": "passRecovered",
+   "label": "Passes récupérées",
+   "value": 35,
+   "unit": "%",
+   "lobbies": 32,
+   "teammates": {
+    "lainox": 42,
+    "rileq": 36
+   }
+  }
+ ],
+ "lastMatch": {
+  "date": "2026-11-14",
+  "result": "D",
+  "index": 9,
+  "verdict": "Mauvais match",
+  "rank": 6,
+  "of": 6,
+  "components": [
+   {
+    "label": "Impact de tes touches",
+    "weight": 56,
+    "score": 8
+   },
+   {
+    "label": "Gestion du boost",
+    "weight": 18,
+    "score": 61
+   },
+   {
+    "label": "Jeu collectif (passes)",
+    "weight": 12,
+    "score": 6
+   },
+   {
+    "label": "Vitesse",
+    "weight": 10,
+    "score": 43
+   },
+   {
+    "label": "50/50 gagnés",
+    "weight": 3,
+    "score": 58
+   },
+   {
+    "label": "Placement hors ballon",
+    "weight": 1,
+    "score": 35
+   },
+   {
+    "label": "Fiabilité (peu de ratés)",
+    "weight": 0,
+    "score": 100
+   }
+  ],
+  "others": {
+   "lainox": 64,
+   "rileq": 54,
+   "opponentsAvg": 46
+  }
+ },
+ "costlyTouches": [
+  {
+   "rank": 1,
+   "date": "2026-11-14",
+   "clock": "2:41",
+   "type": "Arrêt",
+   "before": -0.08,
+   "after": -1.0,
+   "gain": -0.92
+  },
+  {
+   "rank": 2,
+   "date": "2026-11-14",
+   "clock": "4:43",
+   "type": "Contrôle",
+   "before": 0.84,
+   "after": -0.01,
+   "gain": -0.85
+  },
+  {
+   "rank": 3,
+   "date": "2026-11-14",
+   "clock": "2:49",
+   "type": "Tir",
+   "before": 0.71,
+   "after": 0.01,
+   "gain": -0.7
+  },
+  {
+   "rank": 4,
+   "date": "2026-11-14",
+   "clock": "4:56",
+   "type": "Tir",
+   "before": 0.29,
+   "after": 0.03,
+   "gain": -0.27
+  },
+  {
+   "rank": 5,
+   "date": "2026-11-14",
+   "clock": "0:15",
+   "type": "Frappe forte",
+   "before": 0.26,
+   "after": 0.04,
+   "gain": -0.22
+  }
+ ],
+ "indicators": [
+  {
+   "label": "Temps en moitié adverse",
+   "centile": 88
+  },
+  {
+   "label": "Boost volé",
+   "centile": 84
+  },
+  {
+   "label": "Temps à 0 boost",
+   "centile": 71
+  },
+  {
+   "label": "Kickoffs gagnés",
+   "centile": 63
+  },
+  {
+   "label": "Tirs",
+   "centile": 60
+  },
+  {
+   "label": "50/50 gagnés",
+   "centile": 59
+  },
+  {
+   "label": "Bumps infligés",
+   "centile": 57
+  },
+  {
+   "label": "Buts",
+   "centile": 57
+  },
+  {
+   "label": "Part des petits pads",
+   "centile": 57
+  },
+  {
+   "label": "Passes réussies",
+   "centile": 56
+  },
+  {
+   "label": "Balles ratées",
+   "centile": 54
+  },
+  {
+   "label": "Frappes fortes",
+   "centile": 36
+  },
+  {
+   "label": "Démos infligées",
+   "centile": 28
+  },
+  {
+   "label": "Temps lent",
+   "centile": 20
+  },
+  {
+   "label": "Boost gaspillé",
+   "centile": 16
+  },
+  {
+   "label": "Vitesse moyenne",
+   "centile": 16
+  },
+  {
+   "label": "Temps supersonique",
+   "centile": 5
+  }
+ ],
+ "strengths": [
+  {
+   "label": "Temps en moitié adverse",
+   "value": "45,9 %",
+   "category": "Agressivité",
+   "centile": 88
+  },
+  {
+   "label": "Boost volé chez l’adversaire",
+   "value": "7,0 / 5 min",
+   "category": "Boost mana",
+   "centile": 84
+  },
+  {
+   "label": "Temps à 0 boost",
+   "value": "11,2 %",
+   "category": "Boost mana",
+   "centile": 71
+  }
+ ],
+ "weaknesses": [
+  {
+   "label": "Temps supersonique",
+   "value": "10,5 %",
+   "category": "Speed",
+   "centile": 5
+  },
+  {
+   "label": "Vitesse moyenne",
+   "value": "53,5 km/h",
+   "category": "Speed",
+   "centile": 16
+  },
+  {
+   "label": "Boost gaspillé (déjà plein)",
+   "value": "19,6 %",
+   "category": "Boost mana",
+   "centile": 16
+  }
+ ],
+ "categories": [
+  {
+   "label": "50's",
+   "score": 61
+  },
+  {
+   "label": "Agressivité",
+   "score": 58
+  },
+  {
+   "label": "Boost mana",
+   "score": 57
+  },
+  {
+   "label": "Précision",
+   "score": 53
+  },
+  {
+   "label": "Speed",
+   "score": 14
+  }
+ ],
+ "models": [
+  {
+   "label": "Placement hors ballon",
+   "score": 22,
+   "vs": "pros RLCS"
+  },
+  {
+   "label": "Résultat de tes touches",
+   "score": 50,
+   "vs": "lobbies"
+  },
+  {
+   "label": "Choix à la touche",
+   "score": 35,
+   "vs": "pros RLCS",
+   "experimental": true
+  }
+ ],
+ "style": [
+  {
+   "family": "Hauteur",
+   "part": "au sol",
+   "player": 59,
+   "reference": 51
+  },
+  {
+   "family": "Vitesse",
+   "part": "supersonique",
+   "player": 10,
+   "reference": 18
+  },
+  {
+   "family": "Boost",
+   "part": "réserve 0–25",
+   "player": 28,
+   "reference": 35
+  },
+  {
+   "family": "Hauteur",
+   "part": "en l’air (bas)",
+   "player": 34,
+   "reference": 40
+  },
+  {
+   "family": "Vitesse",
+   "part": "lent",
+   "player": 46,
+   "reference": 40
+  },
+  {
+   "family": "Zone",
+   "part": "tiers défensif",
+   "player": 32,
+   "reference": 37
+  },
+  {
+   "family": "Balle",
+   "part": "devant la balle",
+   "player": 32,
+   "reference": 27
+  },
+  {
+   "family": "Boost",
+   "part": "réserve 50–75",
+   "player": 22,
+   "reference": 17
+  },
+  {
+   "family": "Zone",
+   "part": "tiers offensif",
+   "player": 23,
+   "reference": 19
+  },
+  {
+   "family": "Balle",
+   "part": "derrière la balle",
+   "player": 59,
+   "reference": 63
+  },
+  {
+   "family": "Zone",
+   "part": "tiers central",
+   "player": 46,
+   "reference": 44
+  },
+  {
+   "family": "Boost",
+   "part": "réserve 75–100",
+   "player": 31,
+   "reference": 29
+  },
+  {
+   "family": "Touche",
+   "part": "contrôle",
+   "player": 39,
+   "reference": 37
+  },
+  {
+   "family": "Hauteur",
+   "part": "en l’air (haut)",
+   "player": 7,
+   "reference": 9
+  },
+  {
+   "family": "Rôle",
+   "part": "1er homme",
+   "player": 28,
+   "reference": 29
+  },
+  {
+   "family": "Rôle",
+   "part": "2e homme",
+   "player": 30,
+   "reference": 29
+  },
+  {
+   "family": "Vitesse",
+   "part": "rapide",
+   "player": 43,
+   "reference": 42
+  },
+  {
+   "family": "Touche",
+   "part": "frappe forte",
+   "player": 55,
+   "reference": 56
+  },
+  {
+   "family": "Rôle",
+   "part": "3e homme",
+   "player": 29,
+   "reference": 29
+  }
+ ],
+ "terrain": {
+  "_note": "grilles 8 × 10, ligne 0 = but adverse ; valeurs relevées à l'œil sur la capture",
+  "time": [
+   [
+    0.1,
+    0.55,
+    0.4,
+    0.45,
+    0.4,
+    0.5,
+    0.5,
+    0.2
+   ],
+   [
+    0.5,
+    0.35,
+    0.3,
+    0.3,
+    0.25,
+    0.3,
+    0.35,
+    0.55
+   ],
+   [
+    0.55,
+    0.4,
+    0.35,
+    0.35,
+    0.4,
+    0.4,
+    0.35,
+    0.55
+   ],
+   [
+    0.55,
+    0.45,
+    0.45,
+    0.5,
+    0.55,
+    0.5,
+    0.45,
+    0.55
+   ],
+   [
+    0.6,
+    0.5,
+    0.5,
+    0.6,
+    0.55,
+    0.35,
+    0.5,
+    0.6
+   ],
+   [
+    0.7,
+    0.5,
+    0.5,
+    0.6,
+    0.55,
+    0.45,
+    0.5,
+    0.65
+   ],
+   [
+    0.55,
+    0.45,
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.4,
+    0.5
+   ],
+   [
+    0.5,
+    0.45,
+    0.5,
+    0.5,
+    0.55,
+    0.55,
+    0.45,
+    0.5
+   ],
+   [
+    0.45,
+    0.5,
+    0.5,
+    0.65,
+    0.7,
+    0.5,
+    0.5,
+    0.45
+   ],
+   [
+    0.25,
+    0.6,
+    0.65,
+    0.85,
+    0.95,
+    0.6,
+    0.55,
+    0.2
+   ]
+  ],
+  "vsPros": [
+   [
+    0,
+    0.7,
+    0,
+    -0.1,
+    -0.1,
+    0.4,
+    0.4,
+    0.3
+   ],
+   [
+    0.4,
+    0.3,
+    0.3,
+    0,
+    -0.1,
+    0.3,
+    0.2,
+    0.3
+   ],
+   [
+    0.4,
+    0.3,
+    0.3,
+    0.1,
+    0.2,
+    0.3,
+    0.1,
+    0.3
+   ],
+   [
+    0.3,
+    0.1,
+    -0.05,
+    0.4,
+    0.1,
+    0.5,
+    0.1,
+    0.2
+   ],
+   [
+    0,
+    0,
+    -0.1,
+    0.3,
+    0.1,
+    -0.3,
+    0,
+    -0.1
+   ],
+   [
+    0.3,
+    0.1,
+    -0.1,
+    0.2,
+    0,
+    -0.1,
+    0.2,
+    0
+   ],
+   [
+    -0.2,
+    -0.1,
+    -0.2,
+    -0.2,
+    -0.1,
+    -0.1,
+    -0.2,
+    -0.1
+   ],
+   [
+    -0.1,
+    -0.2,
+    -0.2,
+    -0.3,
+    -0.3,
+    -0.1,
+    -0.3,
+    -0.2
+   ],
+   [
+    -0.3,
+    -0.3,
+    -0.35,
+    -0.3,
+    0,
+    -0.3,
+    -0.2,
+    -0.1
+   ],
+   [
+    -0.1,
+    -0.6,
+    -0.7,
+    -0.5,
+    -0.1,
+    -0.6,
+    -0.6,
+    -0.2
+   ]
+  ]
+ },
+ "headToHead": {
+  "teammate": "lainox",
+  "rows": [
+   {
+    "label": "Boost moyen",
+    "unit": "%",
+    "player": 51.4,
+    "mate": 47.1,
+    "better": null
+   },
+   {
+    "label": "Temps à 0 boost",
+    "unit": "%",
+    "player": 11.2,
+    "mate": 11.1,
+    "better": "lower"
+   },
+   {
+    "label": "Boost volé",
+    "unit": "/5 min",
+    "player": 7.0,
+    "mate": 6.1,
+    "better": "higher"
+   },
+   {
+    "label": "Vitesse moyenne",
+    "unit": "km/h",
+    "player": 53.5,
+    "mate": 55.6,
+    "better": "higher"
+   },
+   {
+    "label": "Temps supersonique",
+    "unit": "%",
+    "player": 10.5,
+    "mate": 15.8,
+    "better": "higher"
+   },
+   {
+    "label": "50/50 gagnés",
+    "unit": "%",
+    "player": 52.6,
+    "mate": 45.5,
+    "better": "higher"
+   },
+   {
+    "label": "Tirs",
+    "unit": "/5 min",
+    "player": 2.9,
+    "mate": 3.2,
+    "better": "higher"
+   },
+   {
+    "label": "Buts",
+    "unit": "/5 min",
+    "player": 0.86,
+    "mate": 1.0,
+    "better": "higher"
+   },
+   {
+    "label": "Passes réussies",
+    "unit": "/5 min",
+    "player": 5.1,
+    "mate": 6.3,
+    "better": "higher"
+   },
+   {
+    "label": "Balles ratées",
+    "unit": "/5 min",
+    "player": 1.9,
+    "mate": 3.0,
+    "better": "lower"
+   },
+   {
+    "label": "Démos infligées",
+    "unit": "/5 min",
+    "player": 0.71,
+    "mate": 0.95,
+    "better": "higher"
+   },
+   {
+    "label": "Placement hors ballon",
+    "unit": "/100",
+    "player": 22,
+    "mate": 34,
+    "better": "higher"
+   },
+   {
+    "label": "Choix à la touche",
+    "unit": "/100",
+    "player": 35,
+    "mate": 27,
+    "better": "higher"
+   }
+  ]
+ }
+}
