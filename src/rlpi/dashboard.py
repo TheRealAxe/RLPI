@@ -303,7 +303,8 @@ def value_section(player: str, my_replays: list[str]) -> dict | None:
         tch = me.filter(pl.col("replay") == r)
         match_curves[r] = {
             "v": v, "goals": [{"k": g["i"] // 5, "pour": g["team"] == team} for g in c["goals"]],
-            "touches": [{"k": i // 5, "dv": dv, "a": ACTION_FR.get(a, a)} for i, dv, a in tch.select("i", "dv", "action").iter_rows()],
+            "touches": [{"k": i // 5, "dv": dv, "a": ACTION_FR.get(a, a), "clock": ck, "vb": vb, "va": va}
+                        for i, dv, a, ck, vb, va in tch.select("i", "dv", "action", "clock", "v_before", "v_after").iter_rows()],
             "score": f"{meta['team0_score'] if team == 0 else meta['team1_score']}-{meta['team1_score'] if team == 0 else meta['team0_score']}",
         }
 
@@ -934,13 +935,13 @@ def advice_section(payload: dict) -> list[dict]:
     return out
 
 
-def progress_section(payload: dict, last: int = 20) -> dict | None:
-    """Évolution sur les `last` dernières parties : indice, sous-notes, composantes et technique ;
+def progress_section(payload: dict, last: int | None = None) -> dict | None:
+    """Évolution sur les parties de la période (ou les `last` dernières) : indice, sous-notes, composantes et technique ;
     comparaison seconde moitié vs première moitié, intervalle 80 % par tirage des parties."""
     pf = payload.get("perf")
     if not pf or len(pf["matches"]) < 6:
         return None
-    ms = pf["matches"][-last:]
+    ms = pf["matches"][-last:] if last else pf["matches"]
     n = len(ms); h = n // 2
     rng = np.random.default_rng(0)
     series = {"index": ("Indice", [m["index"] for m in ms], 1)}

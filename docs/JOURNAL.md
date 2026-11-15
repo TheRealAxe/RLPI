@@ -826,3 +826,26 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
   2,6 s puis 0,008 s ; après redémarrage, tout sort du disque (0,014 s) ; 2 demandes simultanées = 1 calcul.
 - Pour survivre aux redéploiements, /app/cache doit être un volume persistant dans Coolify (sinon le pré-calcul
   refait les pages par défaut après chaque déploiement, les pages filtrées repartent de zéro).
+
+## 2026-11-16 — Tableau de bord : parcours revu (périodes et portées)
+
+- Audit avec Théo : la confusion venait de 6 fenêtres de parties différentes jamais affichées (période, 12
+  dernières, N dernières coupées en deux, 10 dernières pour le meilleur jeu, un match, parties ensemble), et des
+  ralentis de toute la période rangés sous « Ce match ».
+- Onglets : Ma forme (par défaut, en premier) · Matchs (ex-Ce match) · Mon jeu · À travailler (nouveau) · Mon trio.
+  Les Conseils restent dans Mon jeu (décision de Théo).
+- Bandeau « Période analysée » sous l'en-tête, sur tous les onglets ; réglable (du / au) quand la page est servie
+  par `rlpi.serve` ou /moi, en lecture seule dans la page générée. Badges de portée sur chaque bloc : PÉRIODE,
+  CE MATCH, ENSEMBLE · n parties, et « 10 dernières parties » pour le meilleur jeu.
+- Une seule fenêtre : la grille de forme et la progression portent sur toute la période (`progress_section`
+  sans limite de 20 parties ; « première moitié vs seconde moitié » de la période).
+- Matchs : « Les actions qui coûtent » du match affiché (les courbes portent maintenant l'horloge et la situation
+  avant/après de chaque touche) ; triangle « ta moyenne sur la période » sur la note décomposée.
+- À travailler : les 10 touches les plus coûteuses de la période (ex-ralentis), gain par type de touche, et la liste
+  du meilleur jeu (`bestplay_index.js`, affichée seulement si elle concerne le joueur affiché). L'ancien lien
+  `#ce-match/ralentis` y renvoie.
+- Liens vers le match : cases de forme, points de Progression et de « match par match », lignes des passes dans le
+  vide, ralentis.
+- Références : 50 de l'indice = performance SSL médiane (la phrase disait « moyenne de tes parties ») ; le sélecteur
+  SSL/RLCS s'appelle « Mon jeu face aux » et n'apparaît que sur Mon jeu / Tous les indicateurs.
+- Limite : le meilleur jeu reste calculé hors ligne sur les 10 dernières parties, il ne suit pas la période.

@@ -130,6 +130,24 @@ h1, h2, h3, h4, p { margin: 0; font-weight: inherit; font-size: inherit; }
 .home { color: var(--ink-muted); text-decoration: none; }
 .home:hover, .home:focus-visible { color: var(--ink); }
 .ctx { display: flex; align-items: center; padding-left: var(--space-4); }
+/* bandeau de période et badges de portée : chaque bloc dit sur quelles parties il porte */
+.periodbar { display: flex; align-items: center; gap: var(--space-2) var(--space-3); flex-wrap: wrap; margin: 0 0 var(--space-5);
+  padding: 8px 14px; background: var(--surface-alt); border-left: 4px solid var(--accent); }
+.periodbar b { font-weight: 800; }
+.periodbar form { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-left: auto; }
+.periodbar button { padding: 4px 12px; background: var(--ink); color: var(--surface); font-weight: 800; }
+.scope { display: inline-block; font-size: var(--fs-axis); line-height: 14px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  padding: 1px 7px; border: 1.5px solid currentColor; white-space: nowrap; vertical-align: middle; }
+.scope--p { color: var(--ink-muted); }
+.scope--m { color: var(--accent-ink, var(--accent)); }
+.scope--e { color: var(--ink-muted); border-style: dashed; }
+.pl-panel .scope--p, .pl-panel .scope--e { color: var(--panel-muted); }
+.costs .pl-row { cursor: pointer; }
+.mjlist a { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: var(--space-3); align-items: baseline; padding: 8px 0;
+  border-bottom: 1px solid var(--rule); color: inherit; text-decoration: none; }
+.mjlist a:hover b { text-decoration: underline; }
+tr.go { cursor: pointer; }
+tr.go:hover td { background: var(--surface-alt); }
 header.pl-header { margin-bottom: var(--space-5); }
 
 /* --- vues --------------------------------------------------------------- */
@@ -365,15 +383,16 @@ footer { margin-top: var(--space-12); }
 <div class="page">
   <nav class="top" aria-label="Profil">
     <div class="tabs" role="tablist" aria-label="Sections du profil">
-      <button class="tab" role="tab" id="tab-ce-match" aria-controls="view-ce-match" data-tab="ce-match"><span class="pl-cut pl-tag">Ce match</span></button>
       <button class="tab" role="tab" id="tab-ma-forme" aria-controls="view-ma-forme" data-tab="ma-forme"><span class="pl-cut pl-tag">Ma forme</span></button>
+      <button class="tab" role="tab" id="tab-ce-match" aria-controls="view-ce-match" data-tab="ce-match"><span class="pl-cut pl-tag">Matchs</span></button>
       <button class="tab" role="tab" id="tab-mon-jeu" aria-controls="view-mon-jeu" data-tab="mon-jeu"><span class="pl-cut pl-tag">Mon jeu</span></button>
+      <button class="tab" role="tab" id="tab-a-travailler" aria-controls="view-a-travailler" data-tab="a-travailler"><span class="pl-cut pl-tag">À travailler</span></button>
       <button class="tab" role="tab" id="tab-mon-trio" aria-controls="view-mon-trio" data-tab="mon-trio"><span class="pl-cut pl-tag">Mon trio</span></button>
     </div>
     <div class="controls pl-small">
       <a class="home" href="index.html" title="Retour à l'accueil">← Accueil</a>
       <label id="who-ctl">Joueur <select class="sel" id="who"></select></label>
-      <label>Comparer à <select class="sel" id="ref"></select></label>
+      <label id="ref-ctl" title="Référence des centiles de Mon jeu">Mon jeu face aux <select class="sel" id="ref"></select></label>
       <button class="linkbtn" id="method-open" data-m="indice" aria-haspopup="dialog">Méthode ⓘ</button>
     </div>
   </nav>
@@ -382,10 +401,12 @@ footer { margin-top: var(--space-12); }
     <div class="pl-cut pl-panel"><h1 class="pl-dx pl-name" id="pname"></h1></div>
     <div class="ctx pl-tag pl-muted" id="ctx"></div>
   </header>
+  <div class="periodbar pl-small" id="periodbar" role="region" aria-label="Période analysée"></div>
   <main id="main">
     <section class="view" id="view-ma-forme" role="tabpanel" aria-labelledby="tab-ma-forme" tabindex="-1"></section>
     <section class="view" id="view-ce-match" role="tabpanel" aria-labelledby="tab-ce-match" tabindex="-1"></section>
     <section class="view" id="view-mon-jeu" role="tabpanel" aria-labelledby="tab-mon-jeu" tabindex="-1"></section>
+    <section class="view" id="view-a-travailler" role="tabpanel" aria-labelledby="tab-a-travailler" tabindex="-1"></section>
     <section class="view" id="view-mon-trio" role="tabpanel" aria-labelledby="tab-mon-trio" tabindex="-1"></section>
     <section class="view" id="view-tous" aria-label="Tous les indicateurs" tabindex="-1"></section>
   </main>
@@ -478,17 +499,37 @@ function symSvg(svg, kind, x, y, s = 6) {
 // ================================================================== état
 let REF = BASE.default_ref, D, M;
 try { const s = localStorage.getItem("rlpi-ref"); if (s && BASE.refs[s]) REF = s; } catch (e) {}
-const ST = { tab: "ma-forme", sub: "match", match: PF ? PF.matches[PF.matches.length - 1].replay : null,
+const ST = { tab: "ma-forme", match: PF ? PF.matches[PF.matches.length - 1].replay : null,
   peer: 0, terrain: "pros", evo: null };
 const PFM = PF ? Object.fromEntries(PF.matches.map(m => [m.replay, m])) : {};
 const VM = V ? Object.fromEntries(V.matches.map(m => [m.replay, m])) : {};
 const REC = Object.fromEntries((BASE.record || []).map(r => [r.d, r]));
 const refLabel = () => D.label;
+// badges de portée : sur quelles parties porte un bloc
+const scP = () => `<span class="scope scope--p" title="Toutes les parties de la période choisie en haut de page">Période</span>`;
+const scM = () => `<span class="scope scope--m" title="Uniquement le match affiché">Ce match</span>`;
+const scE = n => `<span class="scope scope--e" title="Uniquement les parties jouées dans la même équipe">Ensemble · ${n} parties</span>`;
+const scX = (t, title = "") => `<span class="scope scope--e" title="${esc(title)}">${esc(t)}</span>`;
+// bandeau de période : visible sur tous les onglets ; réglable quand la page est servie par rlpi.serve
+function periodBar() {
+  const host = $("#periodbar"), n = BASE.n_matches;
+  const txt = `Période analysée : <b>${n} partie${n > 1 ? "s" : ""}</b> · ${period()}`;
+  const days = ALL.dynamic ? ALL.days || [] : [];
+  if (!days.length) { host.innerHTML = `<span>${txt}</span><span class="pl-muted">Tous les blocs portent sur ces parties, sauf ceux marqués ${scM()} ou ${scX("Ensemble")}.</span>`; return; }
+  const F = ALL.filters || {}, d10 = x => (x || "").slice(0, 10);
+  const opt = (sel, first) => `<option value="">${first}</option>` + days.map(x => `<option value="${x.d}"${x.d === d10(sel) ? " selected" : ""}>${dC(x.d)} · ${x.n} p.</option>`).join("");
+  host.innerHTML = `<span>${txt}</span>
+    <form id="period-form"><label>Du <select class="sel" name="du">${opt(F.du, "début")}</select></label>
+      <label>au <select class="sel" name="au">${opt(F.au, "aujourd'hui")}</select></label><button type="submit">Appliquer</button></form>`;
+  $("#period-form").addEventListener("submit", e => { e.preventDefault(); const u = new URL(location.href), f = e.target;
+    u.searchParams.set("du", f.du.value || days[0].d);  // « début » = premier jour (le serveur ignore un paramètre vide) if (f.au.value) u.searchParams.set("au", f.au.value); else u.searchParams.delete("au");
+    location.href = u.toString(); });
+}
 
 // ================================================================== textes
 const verdict = v => v >= 70 ? "Très bon match" : v >= 55 ? "Bien joué" : v >= 45 ? "Match correct" : v >= 30 ? "Match en dessous" : "Mauvais match";
-const verdictG = v => v >= 65 ? "Tu pèses nettement plus que tes lobbies" : v >= 55 ? "Tu pèses un peu plus que la moyenne de tes parties"
-  : v >= 45 ? "Dans la moyenne de tes parties" : v >= 35 ? "Un peu en dessous de la moyenne de tes parties" : "En dessous de la moyenne de tes parties";
+const verdictG = v => v >= 65 ? "Nettement au-dessus d'une performance SSL médiane" : v >= 55 ? "Au-dessus d'une performance SSL médiane"
+  : v >= 45 ? "Au niveau d'une performance SSL médiane" : v >= 35 ? "Un peu en dessous d'une performance SSL médiane" : "En dessous d'une performance SSL médiane";
 // formulations par indicateur : force (« tu … »), chantier (nom), duel (nom court)
 const PH = {
   boost_zero: ["tu es rarement à sec de boost", "le temps à 0 boost", "le boost à sec"],
@@ -519,7 +560,7 @@ const ACT1 = { "Tirs": "Tir", "Arrêts": "Arrêt", "Dégagements": "Dégagement"
 const act1 = a => ACT1[a] ?? a;
 
 // ================================================================== coquille
-const TABS = ["ce-match", "ma-forme", "mon-jeu", "mon-trio"];
+const TABS = ["ma-forme", "ce-match", "mon-jeu", "a-travailler", "mon-trio"];
 function setupShell() {
   document.title = `${BASE.player} · RLPI`;
   $("#pname").textContent = BASE.player;
@@ -539,16 +580,20 @@ function setupShell() {
       if (j != null) { e.preventDefault(); vis[j].focus(); go(vis[j].dataset.tab); }
     });
   });
+  periodBar();
   $("#foot").textContent = `Généré le ${BASE.generated}. Données : ${BASE.n_matches} parties classées 3v3.`;
 }
-function go(tab, sub = "match") { const h = tab === "ce-match" && sub === "ralentis" ? "ce-match/ralentis" : tab;
-  if (location.hash.slice(1) === h) route(); else location.hash = h; }
+function go(tab) { if (location.hash.slice(1) === tab) route(); else location.hash = tab; }
+// ouvre un match de la période (depuis n'importe quel bloc)
+function openMatch(replay) { if (!PFM[replay]) return; ST.match = replay; go("ce-match"); window.scrollTo({ top: 0 }); }
+const replayOfDate = d => PF?.matches.find(m => m.date === d)?.replay;
 function route() {
-  const h = location.hash.slice(1) || "ma-forme";
-  const [tab, sub] = h.split("/");
+  let h = location.hash.slice(1) || "ma-forme";
+  if (h === "ce-match/ralentis") h = "a-travailler";  // ancien lien : les ralentis sont dans « À travailler »
+  const tab = h.split("/")[0];
   ST.tab = TABS.includes(tab) || tab === "tous" ? tab : "ma-forme";
   if (ST.tab === "mon-trio" && !PEERS.length) ST.tab = "ma-forme";
-  if (ST.tab === "ce-match") ST.sub = sub === "ralentis" ? "ralentis" : "match";
+  $("#ref-ctl").hidden = !(ST.tab === "mon-jeu" || ST.tab === "tous");
   document.querySelectorAll(".tab").forEach(b => { const on = b.dataset.tab === ST.tab || (ST.tab === "tous" && b.dataset.tab === "mon-jeu");
     b.setAttribute("aria-selected", on); b.tabIndex = on ? 0 : -1; });
   document.querySelectorAll(".view").forEach(v => { const on = v.id === "view-" + ST.tab; v.hidden = !on;
@@ -561,7 +606,7 @@ const period = () => BASE.first === BASE.last ? dC(BASE.first) : `du ${dS(BASE.f
 function data() { if (!BASE.refs[REF]) REF = Object.keys(BASE.refs)[0]; D = { ...BASE, ...BASE.refs[REF] };
   M = Object.fromEntries(D.metrics.map(m => [m.key, m])); $("#ref").value = REF; }
 function renderView(tab) {
-  ({ "ma-forme": maForme, "ce-match": ceMatch, "mon-jeu": monJeu, "mon-trio": monTrio, "tous": tous })[tab]();
+  ({ "ma-forme": maForme, "ce-match": ceMatch, "mon-jeu": monJeu, "a-travailler": aTravailler, "mon-trio": monTrio, "tous": tous })[tab]();
 }
 function renderAll() { renderView(ST.tab); renderMethod(); }
 
@@ -571,25 +616,25 @@ function maForme() {
   ctx(`Profil · ${BASE.n_matches} parties classées 3v3 · ${period()}`);
   if (!PF) { root.innerHTML = `<p class="empty">Indice de performance indisponible pour ce profil.</p>`; return; }
   const me = PF.me;
-  const shownM = PF.matches.slice(-12);
+  const shownM = PF.matches;
   const v = shownM.filter(m => m.won).length, n50 = shownM.filter(m => m.index >= 50).length;
   const trio = [...PEERS.map(p => ({ name: p.name, kind: p.slot, v: PF.peers[p.id]?.mean })), { name: "Lobbies", kind: "ref", v: PF.lobby?.mean }].filter(r => r.v != null);
   const last = PF.matches[PF.matches.length - 1];
   root.innerHTML = `
   <div class="g-side">
     <div class="pl-panel pl-cutr scorebug">
-      <div class="bt"><h2 class="pl-tag pl-muted">Indice de performance</h2>${mi("indice", "Indice de performance")}</div>
+      <div class="bt"><h2 class="pl-tag pl-muted">Indice de performance</h2>${mi("indice", "Indice de performance")}${scP()}</div>
       <div class="big"><span class="pl-dx pl-score-xl">${R(me.mean)}</span><span class="pl-dx of">/100</span></div>
-      <p class="pl-body" style="margin-top:6px">${verdictG(me.mean)}.<br>Fourchette ${R(me.lo)}–${R(me.hi)} · 5 dernières : ${R(me.last5)}.</p>
+      <p class="pl-body" style="margin-top:6px">${verdictG(me.mean)} (50).<br>Moyenne de tes matchs · fourchette ${R(me.lo)}–${R(me.hi)} · 5 dernières : ${R(me.last5)}.</p>
       ${me.prod != null ? `<p class="pl-body" style="margin-top:6px">Production <b>${R(me.prod)}</b> · Fondamentaux <b>${R(me.fond)}</b></p>` : ""}
       ${PF.validation?.retest ? `<p class="pl-small pl-muted" style="margin-top:4px">Moyenne fiable vers ${PF.validation.retest.index.matches_for_08} parties (fondamentaux : ${PF.validation.retest.fond.matches_for_08}). Tu en as ${me.n}.</p>` : ""}
     </div>
     <div>
       <div class="trio">
-        <h2 class="pl-tag pl-muted" style="margin-bottom:6px">Ton trio et tes lobbies</h2>
+        <div class="bt" style="margin-bottom:6px"><h2 class="pl-tag pl-muted">Indice de ton trio et de tes lobbies</h2>${scP()}</div>
         ${trio.map(r => `<div class="pl-row">${sym(r.kind)}<span class="pl-dx nm">${esc(r.name)}</span><span class="pl-dx vl">${R(r.v)}</span></div>`).join("")}
       </div>
-      <div class="formhead"><h2 class="pl-tag pl-muted">Forme · ${PF.matches.length > 12 ? "12 dernières parties" : shownM.length + " parties"}</h2>
+      <div class="formhead"><div class="bt"><h2 class="pl-tag pl-muted">Forme · match par match</h2>${scP()}</div>
         <span class="pl-tag">${v} V · ${shownM.length - v} D · <span class="pl-good">${n50} au-dessus de 50</span></span></div>
       <div class="formgrid" role="list" aria-label="Indice match par match, du plus ancien au plus récent">
         ${shownM.map((m, i) => `<button class="formcell" role="listitem" data-replay="${m.replay}"
@@ -597,20 +642,21 @@ function maForme() {
           <span class="pl-cut pl-form ${m.index >= 50 ? "pl-form--up" : "pl-form--down"}${i === shownM.length - 1 ? " pl-form--current" : ""}">
             <span class="pl-tag" style="display:block">${m.won ? "V" : "D"}</span><span class="pl-dx" style="display:block">${R(m.index)}</span></span></button>`).join("")}
       </div>
-      <p class="pl-small pl-muted note">Bleu : indice d'au moins 50 · orange : en dessous. Du plus ancien au plus récent, le cadre marque le dernier match.</p>
+      <p class="pl-small pl-muted note">Bleu : indice d'au moins 50 · orange : en dessous. Du plus ancien au plus récent, le cadre marque le dernier match. Clique sur une case pour ouvrir le match.</p>
     </div>
   </div>
-  <div class="block kpis" id="kpis"></div>
+  <div class="bt block" style="margin-bottom:var(--space-2)"><h2 class="pl-tag pl-muted">Repères</h2>${scP()}</div>
+  <div class="kpis" id="kpis"></div>
   <div class="review">
     <div class="pl-cut pl-tag pl-volt">À revoir</div>
     <div class="pl-cut pl-panel">
-      <span class="pl-dx when">${dS(last.date)} · ${last.won ? "Victoire" : "Défaite"}</span>
+      <span class="pl-dx when">Dernier match · ${dS(last.date)} · ${last.won ? "Victoire" : "Défaite"}</span>
       <span class="pl-dx pl-score" style="color:${last.index >= 50 ? "var(--good)" : "var(--bad-ink)"}">${R(last.index)}</span>
       <span class="pl-body txt">${matchSentence(last, false)}</span>
       <button class="pl-tag go" data-replay="${last.replay}">Voir le match ▸</button>
     </div>
   </div>`;
-  root.querySelectorAll("[data-replay]").forEach(b => b.addEventListener("click", () => { ST.match = b.dataset.replay; go("ce-match", "match"); }));
+  root.querySelectorAll("[data-replay]").forEach(b => b.addEventListener("click", () => openMatch(b.dataset.replay)));
   kpis($("#kpis"));
 }
 function kpis(root) {
@@ -618,9 +664,9 @@ function kpis(root) {
   const peerLine = f => PEERS.map(p => { const x = f(p); return x == null ? "" : `<span class="pl-small">${sym(p.slot, true)}${esc(p.name)} ${x}</span>`; }).join("");
   T.push({ k: "Victoires", m: "centile", v: `${Math.round(BASE.wins / BASE.n_matches * 100)}<small>${NB}%</small>`, s: `${BASE.wins} V · ${BASE.n_matches - BASE.wins} D` });
   if (V) {
-    T.push({ k: "Rang dans la partie", m: "resultat", v: `${num(V.me_lobby_rank, 1)}<small>${NB}/ 6</small>`, s: "1 = meilleur des 6",
+    T.push({ k: "Rang dans la partie", m: "resultat", v: `${num(V.me_lobby_rank, 1)}<small>${NB}/ 6</small>`, s: "face à tes lobbies · 1 = meilleur des 6",
       c: peerLine(p => p.value?.lobby_rank == null ? null : num(p.value.lobby_rank, 1)) });
-    if (V.plc) T.push({ k: "Placement hors ballon", m: "placement", v: `${R(V.plc.me_note)}<small>/100</small>`, s: `face aux pros · lobbies ${R(V.plc.lobby_note)}`,
+    if (V.plc) T.push({ k: "Placement hors ballon", m: "placement", v: `${R(V.plc.me_note)}<small>/100</small>`, s: `face aux pros RLCS · lobbies ${R(V.plc.lobby_note)}`,
       c: peerLine(p => p.value?.plc_note == null ? null : R(p.value.plc_note)) });
     T.push({ k: "Résultat de tes touches", m: "resultat", v: `${R(V.me_lobby_note)}<small>/100</small>`, s: "face à tes lobbies · 50 = médian",
       c: peerLine(p => p.value?.lobby_note == null ? null : R(p.value.lobby_note)) });
@@ -657,7 +703,6 @@ function matchSentence(m, withVerdict = true) {
 function ceMatch() {
   const root = $("#view-ce-match");
   if (!PF) { ctx("Ce match"); root.innerHTML = `<p class="empty">Indice de performance indisponible pour ce profil.</p>`; return; }
-  if (ST.sub === "ralentis") return ralentis(root);
   const list = PF.matches, i = Math.max(0, list.findIndex(x => x.replay === ST.match)), m = list[i];
   ST.match = m.replay;
   const curve = V?.curves?.[m.replay], score = curve?.score || REC[m.date]?.s;
@@ -665,7 +710,7 @@ function ceMatch() {
   const comps = [...PF.components].sort((a, b) => b.weight - a.weight);
   const shownC = comps.filter(c => Math.round(c.weight * 100) > 0), zero = comps.filter(c => Math.round(c.weight * 100) === 0);
   root.innerHTML = `
-  <div class="picker pl-small">
+  <div class="picker pl-small">${scM()}<span class="pl-muted" style="margin-right:auto">Parties de la période, de la plus ancienne à la plus récente.</span>
     <button class="step" id="m-prev" aria-label="Match précédent" ${i === 0 ? "disabled" : ""}>◂</button>
     <label>Partie <select class="sel" id="m-sel">${list.map(x => `<option value="${x.replay}"${x.replay === m.replay ? " selected" : ""}>${dS(x.date)} · ${dParts(x.date).h} · ${x.won ? "V" : "D"} ${scoreTxt(V?.curves?.[x.replay]?.score || REC[x.date]?.s || "")} · indice ${R(x.index)}</option>`).join("")}</select></label>
     <button class="step" id="m-next" aria-label="Match suivant" ${i === list.length - 1 ? "disabled" : ""}>▸</button>
@@ -676,27 +721,27 @@ function ceMatch() {
   </div>
   <div class="g-side-r">
     <div class="pl-panel pl-cutr carton">
-      <div class="bh"><div class="bt"><h2 class="pl-dx pl-title">La note décomposée</h2>${mi("indice", "La note décomposée")}</div><span class="pl-tag pl-muted">poids · note /100</span></div>
+      <div class="bh"><div class="bt"><h2 class="pl-dx pl-title">La note décomposée</h2>${mi("indice", "La note décomposée")}${scM()}</div><span class="pl-tag pl-muted">poids · note /100</span></div>
       ${shownC.map(c => { const s = m.comps[c.key], avg = PF.me.comps[c.key];
         return `<div class="brow"><span class="lab">${esc(c.label)}</span><span class="pl-tag pl-muted w">${Math.round(c.weight * 100)}${NB}%</span>
         <svg width="100%" height="18" viewBox="0 0 300 18" preserveAspectRatio="none" role="img" aria-label="${esc(c.label)} : ${R(s)} sur 100, ta moyenne ${R(avg)}">
           <rect x="0" y="4" width="300" height="10" fill="var(--panel-alt)"/><rect x="0" y="4" width="${Math.max(1, s * 3)}" height="10" fill="${s >= 50 ? "var(--good)" : "var(--bad)"}"/>
-          <rect x="149" y="0" width="2" height="18" fill="var(--panel-ink)"/></svg>
+          <rect x="149" y="0" width="2" height="18" fill="var(--panel-ink)"/>
+          ${avg != null ? `<path d="M${avg * 3 - 5},0 L${avg * 3 + 5},0 L${avg * 3},6 Z" fill="var(--panel-ink)"/><rect x="${avg * 3 - 1}" y="4" width="2" height="10" fill="var(--panel-ink)" opacity=".55"/>` : ""}</svg>
         <span class="pl-dx n ${s >= 50 ? "pl-good" : "pl-bad"}">${R(s)}</span></div>`; }).join("")}
-      <p class="pl-small pl-muted note">${zero.map(c => `${esc(c.label)} : ${R(m.comps[c.key])}, poids 0${NB}%.`).join(" ")} Trait vertical : 50, la médiane SSL.</p>
+      <p class="pl-small pl-muted note">${zero.map(c => `${esc(c.label)} : ${R(m.comps[c.key])}, poids 0${NB}%.`).join(" ")} Trait vertical : 50, la performance SSL médiane. Triangle : ta moyenne sur la période.</p>
     </div>
     <div>
-      <div class="bt" style="margin-bottom:4px"><h2 class="pl-tag pl-muted">Classement de la partie</h2>${mi("indice", "Classement de la partie")}</div>
+      <div class="bt" style="margin-bottom:4px"><h2 class="pl-tag pl-muted">Classement de la partie</h2>${mi("indice", "Classement de la partie")}${scM()}</div>
       <div class="board">${board(m)}</div>
-      <button class="cta" id="to-ralentis"><span class="pl-cut pl-tag pl-volt">Voir les ralentis ▸</span></button>
+      <div class="costs block" id="costs"></div>
     </div>
   </div>
   <div class="block" id="timeline-block"></div>`;
   $("#m-sel").addEventListener("change", e => { ST.match = e.target.value; ceMatch(); });
   $("#m-prev").addEventListener("click", () => { ST.match = list[i - 1].replay; ceMatch(); $("#m-prev").focus(); });
   $("#m-next").addEventListener("click", () => { ST.match = list[i + 1].replay; ceMatch(); $("#m-next").focus(); });
-  $("#to-ralentis").addEventListener("click", () => go("ce-match", "ralentis"));
-  timeline($("#timeline-block"), m);
+  timeline($("#timeline-block"), m); matchCosts($("#costs"), m);
 }
 function board(m) {
   let rows = [{ name: BASE.player, v: m.index, kind: "me", cls: "me" },
@@ -709,6 +754,18 @@ function board(m) {
     ${r.kind === "none" ? `<span class="sym"></span>` : sym(r.kind)}<span class="pl-dx nm">${esc(r.name)}${r.cls === "opp" && !r.norank ? "" : ""}</span><span class="pl-dx vl">${R(r.v)}</span></div>`).join("")
     + (full ? `<p class="pl-small pl-muted note">En gris : les adversaires.</p>` : "");
 }
+// Les touches les plus coûteuses du match affiché (les mêmes que celles de la période, limitées à ce match)
+function matchCosts(host, m) {
+  const c = V?.curves?.[m.replay];
+  if (!c) { host.innerHTML = ""; return; }
+  const bad = c.touches.filter(t => t.dv < 0).sort((a, b) => a.dv - b.dv).slice(0, 5);
+  host.innerHTML = `<div class="bt" style="margin-bottom:4px"><h2 class="pl-tag pl-muted">Les actions qui coûtent</h2>${mi("gain", "Les actions qui coûtent")}${scM()}</div>
+    ${bad.length ? bad.map((t, k) => `<div class="pl-row pl-small"><span class="pl-dx">#${k + 1}</span><span>${t.clock != null ? clock(t.clock) : ""}</span>
+      <span>${esc(act1(t.a))}</span><span class="pl-bad" style="font-weight:800;text-align:right">${sgn(t.dv)}</span></div>`).join("")
+      : `<p class="pl-small pl-muted">Aucune touche n'a dégradé la situation.</p>`}
+    <p class="pl-small pl-muted note">Sur toute la période : onglet <button class="linkbtn" id="to-travail">À travailler ▸</button></p>`;
+  $("#to-travail").addEventListener("click", () => go("a-travailler"));
+}
 // Courbe de situation (déroulé)
 function timeline(host, m) {
   const c = V?.curves?.[m.replay];
@@ -716,7 +773,7 @@ function timeline(host, m) {
   const vals = c.v.filter(v => v != null), up = vals.filter(v => v > 0).length / (vals.length || 1);
   const pos = c.touches.filter(t => t.dv >= 0).length, neg = c.touches.length - pos;
   const big = [...c.touches].sort((a, b) => a.dv - b.dv)[0];
-  host.innerHTML = `<div class="bh"><div class="bt"><h2 class="pl-dx pl-title">Le déroulé</h2>${mi("valeur", "Le déroulé")}</div></div>
+  host.innerHTML = `<div class="bh"><div class="bt"><h2 class="pl-dx pl-title">Le déroulé</h2>${mi("valeur", "Le déroulé")}${scM()}</div></div>
     <p class="pl-body read">La situation a penché pour ton équipe ${Math.round(up * 100)}${NB}% du temps. Tes ${c.touches.length} touches : ${pos} l'ont améliorée, ${neg} l'ont dégradée${big && big.dv < -.2 ? ` (la pire : ${esc(act1(big.a).toLowerCase())}, ${sgn(big.dv)})` : ""}.</p>
     <div id="tl"></div>
     <div class="legend pl-small pl-muted"><span><i class="sw" style="background:var(--good)"></i>favorable</span><span><i class="sw" style="background:var(--bad)"></i>défavorable</span>
@@ -740,13 +797,15 @@ function timeline(host, m) {
     hover(p, `<b>${esc(t.a)}</b> · gain ${sgn(t.dv)}`); });
   txt(svg, L, H - 4, "début"); txt(svg, W - Rr, H - 4, "fin", { "text-anchor": "end" });
 }
-// ---- Ralentis : moments clés + gains par type
-function ralentis(root) {
-  ctx(`Moments clés · tes ${BASE.n_matches} parties`);
-  if (!V) { root.innerHTML = `<p class="empty">Modèle de valeur indisponible.</p>`; return; }
+// ================================================================== À TRAVAILLER
+// Ralentis de la période + gain par type de touche + meilleur jeu (page à part)
+function aTravailler() {
+  const root = $("#view-a-travailler");
+  ctx(`À travailler · ${BASE.n_matches} parties`);
+  if (!V) { root.innerHTML = `<p class="empty">Modèle de valeur indisponible.</p><div class="block" id="bestplay"></div>`; bestPlay($("#bestplay")); return; }
   const W10 = V.worst, top = W10.slice(0, 3), rest = W10.slice(3);
-  root.innerHTML = `<button class="back pl-tag" id="back">◂ Le match</button>
-  <div class="bt"><h2 class="pl-dx h44">Les actions qui coûtent</h2>${mi("gain", "Les actions qui coûtent")}</div>
+  root.innerHTML = `
+  <div class="bt"><h2 class="pl-dx h44">Les actions qui coûtent</h2>${mi("gain", "Les actions qui coûtent")}${scP()}</div>
   <p class="pl-body pl-muted read">Tes ${W10.length} touches les plus coûteuses, placées sur l'horloge de jeu (5:00 → 0:00, temps restant). Plus la barre est haute, plus la touche a coûté.</p>
   <div id="clockline"></div>
   <div class="fiches">${top.map((t, k) => `<div class="pl-panel pl-cutr fiche">
@@ -754,15 +813,30 @@ function ralentis(root) {
       <div class="pl-dx kind">${esc(act1(t.action))}</div><div class="pl-dx cost">${sgn(t.dv)}</div>
       ${sitBar(t)}
       <div class="pl-small pl-muted">Situation ${sgn(t.vb)} → ${sgn(t.va)}</div>
-      <button class="pl-tag open" data-replay="${t.replay}">Voir dans le déroulé ▸</button></div>`).join("")}</div>
+      <button class="pl-tag open" data-replay="${t.replay}">Ouvrir le match ▸</button></div>`).join("")}</div>
   ${rest.length ? `<div class="block others"><h3 class="pl-tag pl-muted" style="margin-bottom:4px">Les ${rest.length} suivantes</h3>
     ${rest.map((t, k) => `<button class="pl-row pl-small" data-replay="${t.replay}"><span class="pl-dx" style="font-size:var(--dx-22)">#${k + 4}</span><span>${dS(t.date)}</span>
       <span class="hide-s">${clock(t.clock)}</span><span>${esc(act1(t.action))}</span><span class="hide-s pl-muted">${sgn(t.vb)} → ${sgn(t.va)}</span><span class="pl-bad" style="text-align:right;font-weight:800">${sgn(t.dv)}</span></button>`).join("")}</div>` : ""}
-  <div class="block" id="gains"></div>`;
-  $("#back").addEventListener("click", () => go("ce-match", "match"));
-  root.querySelectorAll("[data-replay]").forEach(b => b.addEventListener("click", () => { if (PFM[b.dataset.replay]) ST.match = b.dataset.replay; go("ce-match", "match"); }));
+  <div class="block" id="gains"></div>
+  <div class="block" id="bestplay"></div>`;
+  root.querySelectorAll("[data-replay]").forEach(b => b.addEventListener("click", () => openMatch(b.dataset.replay)));
   clockLine($("#clockline"), W10);
   gains($("#gains"));
+  bestPlay($("#bestplay"));
+}
+// Meilleur jeu : page à part (reports/meilleur_jeu.html), calculée hors ligne sur les dernières parties de Théo
+let BP = null;
+function bestPlay(host) {
+  const show = () => {
+    const I = window.BESTPLAY_INDEX, MT = window.BESTPLAY_META;
+    if (!I?.length || !MT || MT.player !== BASE.player) { host.innerHTML = ""; return; }
+    host.innerHTML = `<div class="bt"><h2 class="pl-dx pl-title">Le meilleur jeu</h2>${scX(`${MT.n_games} dernières parties · ${dS(MT.first)} → ${dS(MT.last)}`, "Calculé à part, sur les dernières parties au moment du calcul : peut différer de la période choisie")}</div>
+      <p class="pl-body read">Tes ${I.length} pires actions de tes ${MT.n_games} dernières parties, avec le placement à trois et la touche qu'un pro aurait choisis dans ta situation.</p>
+      <div class="mjlist">${I.map(e => `<a href="meilleur_jeu.html?m=${encodeURIComponent(e.m)}"><span class="pl-dx">#${+e.m + 1}</span><span><b>${esc(e.title)}</b><br><span class="pl-small pl-muted">${esc(e.sub)}</span></span><span class="pl-tag">Voir ▸</span></a>`).join("")}</div>`;
+  };
+  if (BP) return BP.then(show);
+  BP = new Promise(res => { const sc = document.createElement("script"); sc.src = "bestplay_index.js"; sc.onload = sc.onerror = res; document.head.appendChild(sc); });
+  BP.then(show);
 }
 function sitBar(t) { const X = v => (v + 1) / 2 * 220;
   return `<svg width="100%" height="36" viewBox="0 0 220 36" style="margin-top:6px;max-width:220px" role="img" aria-label="Situation avant ${sgn(t.vb)}, après ${sgn(t.va)}">
@@ -784,7 +858,7 @@ function clockLine(host, W10) {
 function gains(host) {
   const A = V.by_action; if (!A?.length) return;
   const best = [...A].sort((a, b) => (b.me - b.ref) - (a.me - a.ref))[0], worst = [...A].sort((a, b) => (a.me - a.ref) - (b.me - b.ref))[0];
-  host.innerHTML = `<div class="bt"><h2 class="pl-dx pl-title">Gain moyen par type de touche</h2>${mi("gain", "Gain moyen par type de touche")}</div>
+  host.innerHTML = `<div class="bt"><h2 class="pl-dx pl-title">Gain moyen par type de touche</h2>${mi("gain", "Gain moyen par type de touche")}${scP()}</div>
     <p class="pl-body read">Tes ${esc(best.label.toLowerCase())} rapportent plus que chez les pros (${sgn(best.me, 3)} contre ${sgn(best.ref, 3)}) ; tes ${esc(worst.label.toLowerCase())} rapportent moins (${sgn(worst.me, 3)} contre ${sgn(worst.ref, 3)}).</p>
     <div id="gainrows"></div>
     <div class="legend pl-small pl-muted"><span>${sym("me")}toi</span><span>${sym("ref")}pros RLCS</span><span>Trait : 0. En classé les tirs rapportent plus (défenses plus faibles) : l'écart avec les pros n'est pas une note.</span></div>`;
@@ -816,7 +890,7 @@ function monJeu() {
   ${lead ? `<p class="lead">${lead}</p>` : ""}
   <div class="g-2">
     <div>
-      <div class="pl-cut pl-tag chip bg-good">Top 3</div>${top.map(tfRow).join("")}
+      <div class="bt" style="margin-bottom:6px"><h2 class="pl-tag pl-muted">Face aux ${L}</h2>${scP()}</div><div class="pl-cut pl-tag chip bg-good">Top 3</div>${top.map(tfRow).join("")}
       <div class="pl-cut pl-tag chip bg-bad" style="margin-top:18px">Flop 3</div>${flop.map(tfRow).join("")}
       <p class="pl-small pl-muted note">Centile face aux ${L} (mieux que x${NB}%) ; trait : 50. ${mi("centile", "Centiles")} <button class="linkbtn" id="to-all">Les ${ms.length} indicateurs ▸</button></p>
     </div>
@@ -844,7 +918,7 @@ function styleHero(host) {
   const peerSt = PEERS.map(p => ({ p, pr: S.peers?.[p.id] }));
   host.innerHTML = `<div class="hero">
     <div class="pl-panel pl-cutr id">
-      <div class="kick"><span class="pl-tag pl-muted">Ton style de jeu</span>${mi("styles", "Styles de jeu")}
+      <div class="kick"><span class="pl-tag pl-muted">Ton style de jeu</span>${mi("styles", "Styles de jeu")}${scP()}
         ${team.length ? `<span class="pl-cut pl-tag pl-volt" style="padding:3px 14px">Trio · ${team.map(t => esc(t.name)).join(" · ")}</span>` : ""}</div>
       <div class="pl-dx nm">${esc(P.polyvalent ? "Polyvalent" : main.name)}</div>
       ${sec ? `<div class="pl-dx sub">${P.polyvalent ? `penchant ${esc(main.name)}` : `teinté ${esc(sec.name)}`}</div>` : ""}
@@ -869,7 +943,7 @@ function styleHero(host) {
 function adviceBlock(host) {
   const A = BASE.advice || [];
   if (!A.length) { host.innerHTML = ""; return; }
-  host.innerHTML = `<div class="bt" style="margin-bottom:8px"><h2 class="pl-dx h44">Conseils</h2>${mi("conseils", "Conseils")}</div>
+  host.innerHTML = `<div class="bt" style="margin-bottom:8px"><h2 class="pl-dx h44">Conseils</h2>${mi("conseils", "Conseils")}${scP()}</div>
     <div class="advice">${A.map(a => `<div class="a"><span class="pl-tag pl-muted">${esc(a.kind)}</span><h3 class="pl-dx">${esc(a.title)}</h3>
       <p class="pl-body">${esc(a.text)}</p><p class="pl-small pl-muted" style="margin-top:4px">${esc(a.why)}</p></div>`).join("")}</div>`;
 }
@@ -883,8 +957,8 @@ function progressBlock(host) {
   const line = c => `<div class="chg"><span><b>${esc(c.label)}</b><br><span class="pl-small pl-muted">${v(c, c.before)} → ${v(c, c.after)}${c.clear ? "" : " · à confirmer"}</span></span>
     <span class="pl-dx d ${c.effect >= 0 ? "pl-good" : "pl-bad"}">${c.effect >= 0 ? "▲" : "▼"}</span><span class="pl-tag ${c.clear ? "" : "pl-muted"}">${c.clear ? "net" : "bruit ?"}</span></div>`;
   const ix = head.index;
-  host.innerHTML = `<div class="bt" style="margin-bottom:8px"><h2 class="pl-dx h44">Progression</h2>${mi("progression", "Progression")}</div>
-    <p class="pl-body read">Tes ${G.n} dernières parties : les ${G.n - G.half} plus récentes face aux ${G.half} d'avant.${ix ? ` Indice ${R(ix.before)} → <b>${R(ix.after)}</b>${ix.clear ? "" : " (écart dans le bruit)"}` : ""}${head.fond ? ` · fondamentaux ${R(head.fond.before)} → <b>${R(head.fond.after)}</b>` : ""}.</p>
+  host.innerHTML = `<div class="bt" style="margin-bottom:8px"><h2 class="pl-dx h44">Progression</h2>${mi("progression", "Progression")}${scP()}</div>
+    <p class="pl-body read">Les ${G.n - G.half} parties les plus récentes de la période face aux ${G.half} d'avant.${ix ? ` Indice ${R(ix.before)} → <b>${R(ix.after)}</b>${ix.clear ? "" : " (écart dans le bruit)"}` : ""}${head.fond ? ` · fondamentaux ${R(head.fond.before)} → <b>${R(head.fond.after)}</b>` : ""}.</p>
     <div class="plot" id="prog-plot" style="margin:8px 0 14px"></div>
     <h3 class="grph pl-tag"><span>Plus fortes progressions</span></h3>${up.map(line).join("") || `<p class="pl-small pl-muted">Aucune.</p>`}
     <h3 class="grph pl-tag"><span>En recul</span></h3>${down.map(line).join("") || `<p class="pl-small pl-muted">Aucun.</p>`}
@@ -896,7 +970,8 @@ function progressBlock(host) {
   el("rect", { x: X(G.half - .5) - .5, y: 0, width: 1, height: H, fill: "var(--rule)" }, svg);
   el("path", { d: G.roll5.map((y, i) => `${i ? "L" : "M"}${X(i)},${Y(y)}`).join(" "), fill: "none", stroke: "var(--accent)", "stroke-width": 2.5 }, svg);
   G.index.forEach((y, i) => hover(el("circle", { cx: X(i), cy: Y(y), r: 4, fill: G.won[i] ? "var(--good-on-dark)" : "var(--bad)", stroke: "var(--surface)", "stroke-width": 1.5 }, svg),
-    `${dS(G.dates[i])} · ${G.won[i] ? "victoire" : "défaite"}<br>Indice <b>${R(y)}</b> · moyenne sur 5 : ${R(G.roll5[i])}`));
+    `${dS(G.dates[i])} · ${G.won[i] ? "victoire" : "défaite"}<br>Indice <b>${R(y)}</b> · moyenne sur 5 : ${R(G.roll5[i])}<br><span class="m">clic : ouvrir le match</span>`));
+  svg.querySelectorAll("circle").forEach((c, i) => { const r = replayOfDate(G.dates[i]); if (!r) return; c.style.cursor = "pointer"; c.addEventListener("click", () => openMatch(r)); });
 }
 function styleGaps(host) {
   const L = refLabel(), all = [];
@@ -905,7 +980,7 @@ function styleGaps(host) {
       all.push({ lab, me: me.parts[i], ref: ref.parts[i], d: (me.parts[i] - ref.parts[i]) * 100, title: c.title }); }); });
   const g = all.sort((a, b) => Math.abs(b.d) - Math.abs(a.d)).slice(0, 6); if (!g.length) { host.innerHTML = ""; return; }
   const mx = Math.max(10, ...g.map(x => Math.abs(x.d)));
-  host.innerHTML = `<div class="bt" style="margin-bottom:4px"><h2 class="pl-tag pl-muted">Ton style · les 6 plus gros écarts aux ${L} (points)</h2>${mi("style", "Style de jeu")}</div>
+  host.innerHTML = `<div class="bt" style="margin-bottom:4px"><h2 class="pl-tag pl-muted">Ton style · les 6 plus gros écarts aux ${L} (points)</h2>${mi("style", "Style de jeu")}${scP()}</div>
     <p class="pl-small read">Ton plus gros écart : ${esc(g[0].lab)} (${esc(g[0].title.toLowerCase())}), ${sgnI(g[0].d)} points. Le style n'a pas de bon sens : la barre ne dit ni bien ni mal.</p>
     ${g.map(x => `<div class="gap"><span><b>${esc(x.lab)}</b><span class="pl-small pl-muted">${Math.round(x.me * 100)}${NB}% contre ${Math.round(x.ref * 100)}${NB}% (${L})</span></span>
       <svg width="100%" height="14" viewBox="0 0 240 14" preserveAspectRatio="none" role="img" aria-label="${esc(x.lab)} : ${sgnI(x.d)} points">
@@ -959,7 +1034,7 @@ function terrain(host) {
     </div>
     <div>
       <div class="seg pl-tag" role="group" aria-label="Carte affichée">${Object.entries(modes).map(([k, l]) => `<button data-mode="${k}" aria-pressed="${k === ST.terrain}">${l}</button>`).join("")}</div>
-      <div class="bt" style="margin-top:12px"><h3 class="pl-dx" style="font-size:var(--dx-24)">${modes[ST.terrain]}</h3>${mi("terrain", "Cartes du terrain")}</div>
+      <div class="bt" style="margin-top:12px"><h3 class="pl-dx" style="font-size:var(--dx-24)">${modes[ST.terrain]}</h3>${mi("terrain", "Cartes du terrain")}${scP()}</div>
       <p class="pl-small" style="margin-top:6px">${phrase}</p>
       <p class="pl-small pl-muted note">Ton équipe attaque vers le haut. ${H.n_pro_replays} matchs RLCS en référence.</p>
     </div>`;
@@ -989,7 +1064,7 @@ function cats(host) {
     <div id="cat-a"></div>
     ${V ? `<h3 class="pl-tag pl-muted" style="margin-top:18px">Notes des modèles</h3><div id="cat-b"></div>` : ""}
     <div class="legend pl-small pl-muted">${PEERS.map(p => `<span>${sym(p.slot)}${esc(p.name)}</span>`).join("")}<span>Trait : 50, la médiane de la référence.</span></div>`
-  : `<div class="bt"><h2 class="pl-dx pl-title">Notes des modèles</h2>${mi("centile", "Notes des modèles")}</div>
+  : `<div class="bt"><h2 class="pl-dx pl-title">Notes des modèles</h2>${mi("centile", "Notes des modèles")}${scP()}</div>
     <div id="cat-b"></div>
     <div class="legend pl-small pl-muted">${PEERS.map(p => `<span>${sym(p.slot)}${esc(p.name)}</span>`).join("")}<span>Trait : 50, la médiane de la référence.</span></div>`;
   if (SHOW_RLPI_CATS) catBar($("#cat-a"), rad.map(c => ({ label: c.cat, sub: `${c.n} indicateur${c.n > 1 ? "s" : ""} · face aux ${L}`, v: c.note, peer: p => c.peers?.[p.id] })), L);
@@ -1006,7 +1081,7 @@ function passes(host) {
   const order = ["me", ...PEERS.map(p => p.id), "lobby", "rlcs"];
   const G = PS.groups.filter(g => order.includes(g.key)).sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
   const me = G.find(g => g.key === "me"), lob = G.find(g => g.key === "lobby");
-  host.innerHTML = `<div class="bt"><h2 class="pl-dx pl-title">Que deviennent tes balles données ?</h2>${mi("passes", "Balles données")}</div>
+  host.innerHTML = `<div class="bt"><h2 class="pl-dx pl-title">Que deviennent tes balles données ?</h2>${mi("passes", "Balles données")}${scP()}</div>
     <p class="pl-body read">${pc(me.recovered)} de tes balles données sont reprises par un coéquipier (lobbies : ${pc(lob?.recovered)}). ${pc(me.split?.[3])} partent dans le vide.</p>
     ${G.map(g => { const peer = PEERS.find(p => p.id === g.key), name = g.key === "me" ? BASE.player : peer ? peer.name : g.label;
       const kind = g.key === "me" ? "me" : peer ? peer.slot : "ref";
@@ -1016,8 +1091,10 @@ function passes(host) {
     <div class="legend pl-small pl-muted">${labs.map((l, i) => `<span><i class="sw" style="background:${fills[i]};opacity:${ops[i]}"></i>${l}</span>`).join("")}<span>À droite : balles données / 5 min.</span></div>
     ${PS.void?.length ? `<details class="more"><summary class="pl-small">Tes ${PS.void.length} passes dans le vide les plus coûteuses</summary>
       <table class="t pl-small"><thead><tr><th>Partie</th><th class="n">Horloge</th><th>Passe</th><th class="n">Coéq. / adv.</th><th class="n">Gain 2 s</th></tr></thead><tbody>
-      ${PS.void.map(t => `<tr><td>${dS(t.date)}</td><td class="n">${clock(t.clock)}</td><td>${esc(t.act)}</td><td class="n">${Math.round(t.d_mate)}${NB}m / ${Math.round(t.d_opp)}${NB}m</td><td class="n pl-bad">${sgn(t.dv)}</td></tr>`).join("")}
+      ${PS.void.map(t => `<tr${PFM[replayOfDate(t.date)] ? ` class="go" data-replay="${replayOfDate(t.date)}" tabindex="0" title="Ouvrir le match"` : ""}><td>${dS(t.date)} ▸</td><td class="n">${clock(t.clock)}</td><td>${esc(t.act)}</td><td class="n">${Math.round(t.d_mate)}${NB}m / ${Math.round(t.d_opp)}${NB}m</td><td class="n pl-bad">${sgn(t.dv)}</td></tr>`).join("")}
       </tbody></table></details>` : ""}`;
+  host.querySelectorAll("tr.go").forEach(tr => { tr.addEventListener("click", () => openMatch(tr.dataset.replay));
+    tr.addEventListener("keydown", e => { if (e.key === "Enter") openMatch(tr.dataset.replay); }); });
   host.querySelectorAll(".bar i").forEach(s => { const g = G.find(x => x.key === s.dataset.g), i = +s.dataset.i;
     hover(s, `${labs[i]} : <b>${pc(g.split[i])}</b><br><span class="m">${g.n.toLocaleString("fr-FR")} balles données</span>`); });
 }
@@ -1042,6 +1119,7 @@ function monTrio() {
   let grp = null;
   root.innerHTML = `
   ${PEERS.length > 1 ? `<div class="seg pl-tag" role="group" aria-label="Coéquipier" style="margin-bottom:var(--space-4)">${PEERS.map((x, i) => `<button data-i="${i}" aria-pressed="${i === ST.peer}">${sym(x.slot)} ${esc(x.name)}</button>`).join("")}</div>` : ""}
+  <div class="bt" style="margin-bottom:var(--space-2)"><h2 class="pl-tag pl-muted">Face-à-face</h2>${scE(p.n_shared)}</div>
   <div class="tape-head">
     <div class="l"><div class="pl-tag win-me">◆ Toi</div><div class="pl-dx big">${esc(BASE.player)} <span class="win-me">${R(meI)}</span></div></div>
     <div class="pl-dx vs">vs</div>
@@ -1072,7 +1150,7 @@ function synergy(host, p) {
     return better ? ["mieux que les SSL", "pl-good"] : worse ? ["moins bien que les SSL", "pl-bad"] : ["comme les SSL", "pl-muted"]; };
   const good = S.rows.filter(r => verdict(r)[1] === "pl-good").map(r => r.label.toLowerCase()), bad = S.rows.filter(r => verdict(r)[1] === "pl-bad").map(r => r.label.toLowerCase());
   const dir = (a, b, d) => `<div class="row" role="row"><div class="lab pl-tag" role="rowheader">${a} → ${b}</div><div role="cell" class="pl-dx">${num(d.sert, 1)}${NB}%</div><div role="cell" class="pl-dx ${d.bonus >= 0 ? "" : "pl-bad"}">${sgn(d.bonus, 1)}</div><div role="cell" class="pl-small pl-muted">${d.n} enchaînements</div></div>`;
-  host.innerHTML = `<div class="bt"><h2 class="pl-dx h44">Notre synergie</h2>${mi("synergie", "Synergie")}</div>
+  host.innerHTML = `<div class="bt"><h2 class="pl-dx h44">Notre synergie</h2>${mi("synergie", "Synergie")}${scE(S.n)}</div>
   <p class="pl-body read">${S.n} parties ensemble, ${S.n_chains} enchaînements entre vous.${good.length ? ` Point fort : ${joinFr(good)}.` : ""}${bad.length ? ` À travailler : ${joinFr(bad)}.` : ""}${!good.length && !bad.length ? " Rien ne se détache nettement des paires SSL." : ""}</p>
   <h3 class="grph pl-tag"><span>Votre paire · bande 80${NB}% · trait = SSL · rond = toi + inconnu</span><span>valeur · verdict</span></h3>
   <div id="syn-rows">${S.rows.map((r, i) => { const [vt, vc] = verdict(r);
@@ -1112,7 +1190,7 @@ function tous() {
     <span><b style="font-weight:700">${esc(label)}</b><br><span class="pl-small pl-muted">${esc(sub)}</span></span><div class="plot" data-note="${note ?? ""}"></div>
     <span class="vl"><span class="pl-dx">${note == null ? "" : R(note)}</span><br><span class="pl-small pl-muted">${val}</span></span></button>`;
   root.innerHTML = `<button class="back pl-tag" id="back">◂ Mon jeu</button>
-  <div class="bt"><h2 class="pl-dx h44">Tous les indicateurs</h2>${mi("centile", "Tous les indicateurs")}</div>
+  <div class="bt"><h2 class="pl-dx h44">Tous les indicateurs</h2>${mi("centile", "Tous les indicateurs")}${scP()}</div>
   <p class="pl-body read">${ms.length} indicateurs notés face aux ${L}, du meilleur au moins bon : ${ms.filter(m => m.note >= 50).length} au-dessus de la médiane. Choisis une ligne pour voir son évolution match par match.</p>
   <div class="block" id="evo-block"></div>
   <h3 class="grph pl-tag"><span>Notés · centile face aux ${L}</span><span>note · valeur</span></h3>
@@ -1165,7 +1243,7 @@ function evo(host) {
   const avg = a => a.reduce((s, p) => s + p.v, 0) / (a.length || 1);
   const fv = v => model ? (unit === "/6" ? num(v, 1) : R(v)) : fmt(v, unit);
   const trend = ok.length >= 4 ? `Moyenne de ta première moitié de parties : ${fv(avg(first))} ; de la seconde : ${fv(avg(second))}.` : "";
-  host.innerHTML = `<div class="bh"><h3 class="pl-dx pl-title">${esc(label)} · match par match</h3><span class="pl-tag pl-muted">${invert ? "plus bas = mieux · courbe retournée" : ""}</span></div>
+  host.innerHTML = `<div class="bh"><h3 class="pl-dx pl-title">${esc(label)} · match par match</h3>${scP()}<span class="pl-tag pl-muted">${invert ? "plus bas = mieux · courbe retournée" : ""}</span></div>
     <p class="pl-body read">${trend} Trait gris : ${refl} (${fv(refv)}).</p><div id="evo"></div>
     <div class="legend pl-small pl-muted"><span>${sym("me")}un match (V/D sous le point)</span><span><svg width="22" height="10" aria-hidden="true"><line x1="1" x2="21" y1="5" y2="5" stroke="var(--me)" stroke-width="3"/></svg>moyenne sur 5 parties</span><span>${sym("ref")}${refl}</span></div>`;
   const host2 = $("#evo"), W = width(host2), H = 220, Lp = 40, Rp = 12, T = 12, B = 30, n = pts.length;
@@ -1178,7 +1256,9 @@ function evo(host) {
   const roll = pts.map((p, i) => { const w = pts.slice(Math.max(0, i - 4), i + 1).map(x => x.v).filter(v => v != null); return w.length ? w.reduce((a, b) => a + b) / w.length : null; });
   el("polyline", { points: roll.map((v, i) => v == null ? null : `${X(i)},${Y(v)}`).filter(Boolean).join(" "), fill: "none", stroke: "var(--me)", "stroke-width": 3, "stroke-linejoin": "round" }, svg);
   pts.forEach((p, i) => { if (p.v == null) return;
-    hover(symSvg(svg, "me", X(i), Y(p.v), 5), `<b>${dL(p.d)}</b>${p.w == null ? "" : " · " + (p.w ? "victoire" : "défaite")}<br>${esc(label)} : <b>${fv(p.v)}</b>`);
+    const pt = symSvg(svg, "me", X(i), Y(p.v), 5), rp = replayOfDate(p.d);
+    hover(pt, `<b>${dL(p.d)}</b>${p.w == null ? "" : " · " + (p.w ? "victoire" : "défaite")}<br>${esc(label)} : <b>${fv(p.v)}</b>${rp ? `<br><span class="m">clic : ouvrir le match</span>` : ""}`);
+    if (rp) { pt.style.cursor = "pointer"; pt.addEventListener("click", () => openMatch(rp)); }
     if (p.w != null && n <= 30) txt(svg, X(i), H - B + 16, p.w ? "V" : "D", { "text-anchor": "middle", style: `fill:${p.w ? "var(--ink)" : "var(--ink-muted)"}` }); });
 }
 
@@ -1229,7 +1309,7 @@ function glossary() {
       example: PF ? `Poids actuels : ${[...PF.components].sort((a, b) => b.weight - a.weight).map(c => `${c.label.toLowerCase()} ${Math.round(c.weight * 100)} %`).join(", ")}. Un match où tu as beaucoup apporté avec tes touches et rarement été à sec de boost sort vers 70–80, même perdu.` : "",
       read: ["Au-dessus de 55 : bien joué dans cette partie ; 45–55 : correct ; en dessous de 45 : tu as moins pesé que les autres.",
         PF ? `Pourquoi ce n'est pas un niveau : les autres joueurs de tes parties obtiennent ${Math.round(PF.lobby.mean)} en moyenne, presque comme des SSL entre eux. L'impact de tes touches (la moitié de la note) est plus facile à obtenir face à des adversaires plus faibles. Ton niveau technique est mesuré à part (Mon jeu › Tous les indicateurs › Technique).` : "",
-        "Dans Ce match, la note décomposée montre quelle composante a fait monter ou baisser la note ce jour-là. Le classement de la partie compare ton indice à celui des 5 autres joueurs, calculé de la même façon.",
+        "Dans l'onglet Matchs, la note décomposée montre quelle composante a fait monter ou baisser la note ce jour-là. Le classement de la partie compare ton indice à celui des 5 autres joueurs, calculé de la même façon.",
         val ? `Validité vérifiée : l'équipe dont l'indice moyen est le plus haut gagne ${Math.round(val.team_acc_oof * 100)} % des parties SSL (validation croisée)${val.rlcs_team_acc ? `, ${Math.round(val.rlcs_team_acc * 100)} % de ${val.rlcs_n_matches} matchs RLCS jamais vus` : ""} et ${Math.round(val.perso_team_acc * 100)} % de tes ${val.perso_n_matches} parties.` : "",
         val?.retest ? `<b>Fiabilité</b> : une note de match bouge beaucoup d'une partie à l'autre, même pour un pro. Il faut environ <b>${val.retest.index.matches_for_08} parties</b> pour que ta moyenne soit stable (fiabilité 0,8) ; pour les fondamentaux, <b>${val.retest.fond.matches_for_08}</b> suffisent, pour la production il en faudrait ${val.retest.prod.matches_for_08}. Une note de match raconte ce qui s'est passé ; pour juger ta progression, regarde des moyennes.` : ""],
       limits: ["L'impact des touches pèse environ la moitié de la note et c'est la partie la plus volatile : quelques grosses touches font la note d'un match.", "Les poids reflètent ce qui fait gagner en SSL, pas forcément ce qui fait progresser.", "Ne voit pas la communication, le mental ni les feintes : seulement ce qui se mesure dans le replay."] },
@@ -1240,7 +1320,7 @@ function glossary() {
         `<b>Il a appris à reconnaître les situations dangereuses</b> à partir de 99 informations : où est la balle et où elle va (vers un cadre ou non, dans combien de temps), où sont les 6 voitures, leur vitesse, leur boost, si elles sont démolies, si elles font face à la balle, combien de joueurs sont du bon côté de la balle, le temps restant et l'écart au score.`,
         `<b>Valeur</b> = chance que ton équipe marque − chance que l'adversaire marque, dans les ${vm ? vm.horizon_s : 5} s.`],
       example: "Ton coéquipier récupère la balle face au but adverse vide, les 3 adversaires sont derrière : la valeur monte vers +0,6. L'adversaire part seul vers votre but alors que vous êtes tous devant : elle descend vers −0,5.",
-      read: ["La valeur ne juge personne : elle décrit la situation. C'est sa variation après une touche qui sert à juger la touche (voir « Gain d'une touche »).", "Dans Ce match, « Le déroulé » trace cette valeur toutes les 0,5 s pendant le jeu.",
+      read: ["La valeur ne juge personne : elle décrit la situation. C'est sa variation après une touche qui sert à juger la touche (voir « Gain d'une touche »).", "Dans l'onglet Matchs, « Le déroulé » trace cette valeur toutes les 0,5 s pendant le jeu.",
         vm ? `Testé sur ${vm.n_test_matches} matchs jamais vus : AUC ${vm.auc.toFixed(2).replace(".", ",")} (0,5 = hasard, 1 = parfait). Quand il annonce 30 % de chances, il y a bien environ 30 % de buts.` : ""],
       limits: ["Appris sur des pros : en classé, les défenses encaissent plus, donc les vraies chances de but y sont plus élevées que ce qu'il annonce.", "Ne connaît pas l'avenir au-delà de 5 s : une construction lente n'est récompensée qu'au moment où elle devient dangereuse."] },
     { id: "gain", title: "Gain d'une touche et impact",
@@ -1251,7 +1331,7 @@ function glossary() {
         "Impact = somme de tous tes gains du match ÷ temps de jeu effectif × 5 minutes."],
       example: "Tu dégages une balle qui partait au fond : la valeur passe de −0,40 à −0,05, gain +0,35. Tu fais une passe en retrait que l'adversaire intercepte face à ton but : de +0,10 à −0,30, gain −0,40.",
       read: ["Positif = ta touche a amélioré la situation ; négatif = elle l'a dégradée.", "Une touche moyenne rapporte environ +0,02 : c'est l'accumulation qui fait la différence.",
-        "Les ralentis (Ce match › Voir les ralentis) listent tes 10 touches les plus coûteuses ; l'horloge est le temps restant au moment de la touche (5:00 → 0:00).",
+        "Les ralentis (onglet À travailler) listent tes 10 touches les plus coûteuses ; l'horloge est le temps restant au moment de la touche (5:00 → 0:00).",
         "Le gain moyen par type de touche compare tes touches à toutes celles des matchs RLCS ; en classé, les défenses encaissent environ " + (V?.ranked_goal_ratio ?? 1.5) + "× plus de buts que ne le prévoit le modèle : une touche vers le but y rapporte donc plus."],
       limits: ["Ne juge que les touches : le travail sans ballon (pression, couverture, feintes) n'y apparaît pas directement.", "Une touche correcte peut être pénalisée si un coéquipier perd la balle juste après (fenêtre d'1 s)."] },
     { id: "resultat", title: "Résultat de tes touches et rang dans la partie",
