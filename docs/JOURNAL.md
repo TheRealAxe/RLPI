@@ -737,3 +737,21 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
   (modèles, Redis, Postgres, Garage), 3 parties de Théo traitées de bout en bout via `enqueue --ballchasing 3`
   (confirmé par Théo). Pièges rencontrés : URL Redis copiée masquée, `S3_ENDPOINT` collé avec la syntaxe d'un lien
   Markdown ; Garage rattaché au réseau partagé de Coolify. Temps par partie sur le serveur : pas encore relevé.
+
+## 2026-11-15 — Pages joueurs (agrégation + tableau de bord multi-joueurs)
+
+- `rlpi.players` : télécharge les parties d'un joueur depuis Garage (`users/<joueur>/games/`, manifeste des ETag :
+  seules les parties nouvelles ou modifiées sont rapatriées), les rassemble (`game.merge`, source « perso ») dans
+  `<données>/users/<joueur>/data` avec des liens vers les données de référence (RLCS, SSL, rapports des modèles),
+  calcule la synergie, puis le contenu du tableau de bord dans un processus séparé (`RLPI_DATA` = dossier du
+  joueur ; `dashboard.py` inchangé).
+- Joueur suivi détecté (le plus présent), coéquipiers comparés = les 2 plus fréquents avec ≥ 5 parties ensemble ;
+  surcharge possible par `users/<joueur>/profile.json`.
+- `serve.py` : route `/joueur/<joueur>` (mêmes filtres que `/tableau_de_bord.html`, mise en cache tant que les
+  données ne changent pas). Image du tableau de bord : + boto3.
+- Test local (stockage simulé par les 11 parties du test d'équivalence) : regroupement 1,8 s, calcul 3,3 s, page
+  1,4 Mo avec toutes les sections ; Axe détecté, LAinox et Rileq comparés ; 2e affichage sans recalcul ; joueur
+  inconnu → 404. Lecture S3 réelle non testée en local.
+- Limites : pas de connexion (page visible par qui connaît l'adresse) ; actions à revoir (bestplay worst) et pages
+  annexes (swipe, fantôme, modèles) restent celles de Théo ; la phrase de validité de l'indice cite les chiffres
+  des parties de Théo (perf_report.json).

@@ -11,8 +11,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=3001 \
     RLPI_REPORTS=/app/data/reports
 
-# Seulement ce que le serveur utilise (pas de collecte ni de parsing en production)
-RUN pip install --no-cache-dir "polars>=2.1" "pyarrow>=20" "numpy>=2" "python-dotenv>=1.2" "pyyaml>=6"
+# Seulement ce que le serveur utilise (pas de collecte ni de parsing en production).
+# boto3 : lecture des parties des joueurs dans le stockage S3 (pages /joueur/<joueur>, voir rlpi.players).
+RUN pip install --no-cache-dir "polars>=2.1" "pyarrow>=20" "numpy>=2" "python-dotenv>=1.2" "pyyaml>=6" "boto3>=1.35"
 
 COPY config ./config
 COPY src ./src

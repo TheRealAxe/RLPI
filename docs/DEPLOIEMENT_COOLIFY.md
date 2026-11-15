@@ -260,6 +260,26 @@ Sans accès SSH, le plus simple est de passer par ballchasing (variable `BALLCHA
 Avec un accès SSH, on peut aussi copier des fichiers : `docker cp <dossier> <conteneur_du_worker>:/tmp/replays`
 puis `python -m rlpi.worker enqueue --user theo /tmp/replays/*.replay`.
 
+### B6 bis. Pages joueurs sur le tableau de bord
+
+Le serveur du tableau de bord (application `docker-image-a1dvrpm…`, domaine `rlpi.lainox.quest`) affiche le
+tableau de bord d'un joueur à partir de ses parties traitées par les workers : `https://rlpi.lainox.quest/joueur/<joueur>`
+(ex. `/joueur/theo`, le nom donné à `enqueue --user`).
+
+1. Dans l'application du tableau de bord → *Environment Variables*, ajouter les mêmes variables de stockage que
+   le worker : `S3_ENDPOINT` (`http://garage-fj4rezthgm9pyk3rggqpjsw6:3900`, tapé à la main), `S3_ACCESS_KEY`,
+   `S3_SECRET_KEY`, `S3_BUCKET` (`rlpi`), `S3_REGION` (`garage`). *Save*, *Redeploy*.
+2. Ouvrir `https://rlpi.lainox.quest/joueur/theo`. Le premier affichage prend quelques secondes (téléchargement des
+   parties, regroupement, calcul) ; les suivants sont immédiats tant qu'aucune partie n'arrive.
+3. Les parties du joueur sont gardées dans le volume du tableau de bord (`/app/data/users/<joueur>/`), environ
+   1 Mo par partie.
+
+Joueur suivi : celui qui apparaît dans le plus de parties ; coéquipiers comparés : les 2 plus fréquents (au moins
+5 parties ensemble). Pour forcer un autre choix, déposer dans le stockage `users/<joueur>/profile.json` :
+`{"player": "<pseudo ou identifiant>", "compare": ["<pseudo>", "<pseudo>"]}`.
+
+⚠️ Aucune connexion n'est demandée pour l'instant : quiconque connaît l'adresse `/joueur/<joueur>` voit la page.
+
 ### B7. Surveillance au quotidien
 
 - Coolify → *Notifications* : activer les alertes (Discord ou e-mail) pour échec de déploiement, conteneur arrêté

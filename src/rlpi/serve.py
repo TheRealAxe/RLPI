@@ -9,6 +9,8 @@
   puis mise en cache tant que les données ne changent pas.
 - N'écoute que sur 127.0.0.1 par défaut.
 - /health répond « ok » (contrôle de santé du conteneur).
+- /joueur/<joueur> : tableau de bord d'un joueur de la version multi-joueurs (parties traitées par les workers,
+  lues dans le stockage S3 ; voir rlpi.players). Mêmes paramètres que /tableau_de_bord.html.
 
 En production (conteneur Coolify), tout se règle par variables d'environnement :
     RLPI_HOST=0.0.0.0  PORT=3001  RLPI_REPORTS=/app/data/reports
@@ -73,7 +75,49 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if u.path in ("/tableau_de_bord.html", "/tableau_de_bord"):
             return self.dashboard(parse_qs(u.query))
+        if u.path.startswith("/joueur/"):
+            return self.player_dashboard(u.path.removeprefix("/joueur/").strip("/"), parse_qs(u.query))
         return super().do_GET()
+
+    def send_html(self, html: str, status: int = 200) -> None:
+        body = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def player_dashboard(self, user: str, q: dict) -> None:
+        """Tableau de bord d'un joueur de la version multi-joueurs : /joueur/<joueur>?j=…&du=…&au=…"""
+        from rlpi import players
+
+        if not players.enabled():
+            return self.send_html("<p>Espace joueur non configuré (variables S3_* absentes).</p>", 404)
+        user = players.safe(user)
+        get = lambda k: (q.get(k) or [""])[0].strip() or None  # noqa: E731
+        try:
+            data = players.build(user)
+        except Exception as e:  # noqa: BLE001 — stockage indisponible…
+            print(f"joueur {user} : {type(e).__name__}: {e}", flush=True)
+            return self.send_html("<p>Données du joueur momentanément indisponibles. Réessaie dans un instant.</p>", 503)
+        if data is None:
+            return self.send_html(f"<p>Aucune partie traitée pour « {user} » pour l'instant.</p>", 404)
+        stats = data / "features" / "player_match_stats_perso.parquet"
+        args = (get("j"), get("du"), get("au"),
+                [x for x in (get("avec") or "").split(",") if x], [x for x in (get("sans") or "").split(",") if x])
+        key = ("joueur", user, args[:3], tuple(args[3]), tuple(args[4]),
+               stats.stat().st_mtime if stats.exists() else 0, TEMPLATE.stat().st_mtime)
+        html = self.cache.get(key)
+        if html is None:
+            try:
+                d = players.payload(user, data, *args)
+            except Exception as e:  # noqa: BLE001
+                print(f"joueur {user} : {type(e).__name__}: {e}", flush=True)
+                return self.send_html("<p>Le tableau de bord de ce joueur n'a pas pu être calculé.</p>", 500)
+            html = TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", json.dumps(d, ensure_ascii=False))
+            self.cache[key] = html
+        self.send_html(html)
 
     def dashboard(self, q: dict) -> None:
         ids, names, days = roster()
