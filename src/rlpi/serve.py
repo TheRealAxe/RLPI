@@ -9,8 +9,8 @@
   puis mise en cache tant que les données ne changent pas.
 - N'écoute que sur 127.0.0.1 par défaut.
 - /health répond « ok » (contrôle de santé du conteneur).
-- /joueur/<joueur> : tableau de bord d'un joueur de la version multi-joueurs (parties traitées par les workers,
-  lues dans le stockage S3 ; voir rlpi.players). Mêmes paramètres que /tableau_de_bord.html.
+- Version multi-joueurs (voir rlpi.account et rlpi.players) : /connexion (Steam), /moi (tableau de bord du joueur
+  connecté, mêmes paramètres que /tableau_de_bord.html), POST /moi/actualiser, /deconnexion.
 
 En production (conteneur Coolify), tout se règle par variables d'environnement :
     RLPI_HOST=0.0.0.0  PORT=3001  RLPI_REPORTS=/app/data/reports
@@ -75,49 +75,91 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if u.path in ("/tableau_de_bord.html", "/tableau_de_bord"):
             return self.dashboard(parse_qs(u.query))
-        if u.path.startswith("/joueur/"):
-            return self.player_dashboard(u.path.removeprefix("/joueur/").strip("/"), parse_qs(u.query))
+        if u.path in ("/moi", "/connexion", "/connexion/retour", "/deconnexion"):
+            return self.account_route(u.path, parse_qs(u.query))
         return super().do_GET()
 
-    def send_html(self, html: str, status: int = 200) -> None:
+    def do_POST(self):
+        if urlparse(self.path).path == "/moi/actualiser":
+            return self.account_route("/moi/actualiser", {})
+        self.send_error(404)
+
+    def send_html(self, html: str, status: int = 200, headers: dict | None = None) -> None:
         body = html.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
-    def player_dashboard(self, user: str, q: dict) -> None:
-        """Tableau de bord d'un joueur de la version multi-joueurs : /joueur/<joueur>?j=…&du=…&au=…"""
-        from rlpi import players
+    def redirect(self, to: str, cookie: str | None = None) -> None:
+        self.send_response(303)
+        self.send_header("Location", to)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
-        if not players.enabled():
-            return self.send_html("<p>Espace joueur non configuré (variables S3_* absentes).</p>", 404)
-        user = players.safe(user)
+    def account_route(self, path: str, q: dict) -> None:
+        """Connexion Steam et page personnelle (version multi-joueurs)."""
+        from rlpi import account
+
+        if not account.configured():
+            return self.send_html(account.page("RLPI", "<p>Espace joueur non configuré sur ce serveur.</p>"), 404)
+        if path == "/connexion":
+            return self.redirect(account.steam_login_url())
+        if path == "/connexion/retour":
+            try:
+                steam_id = account.steam_verify(q)
+            except Exception as e:  # noqa: BLE001 — Steam injoignable
+                print(f"connexion Steam : {type(e).__name__}: {e}", flush=True)
+                steam_id = None
+            if not steam_id:
+                return self.send_html(account.page("RLPI", "<p>La connexion Steam n'a pas abouti.</p>"
+                                                           "<a class='btn' href='/connexion'>Réessayer</a>"), 403)
+            return self.redirect("/moi", account.make_cookie(account.login(steam_id)))
+        if path == "/deconnexion":
+            return self.redirect("/moi", account.clear_cookie())
+        pid = account.session_player(self.headers.get("Cookie"))
+        if pid is None:
+            return self.send_html(account.login_page())
+        if path == "/moi/actualiser":
+            done = account.refresh(pid)
+            return self.redirect("/moi?recherche=" + ("1" if done else "attente"))
+        return self.my_dashboard(pid, q)
+
+    def my_dashboard(self, pid: str, q: dict) -> None:
+        from rlpi import account, players
+
         get = lambda k: (q.get(k) or [""])[0].strip() or None  # noqa: E731
+        msg = {"1": "Recherche lancée : les nouvelles parties arrivent dans quelques minutes.",
+               "attente": "Recherche déjà faite il y a moins de 5 minutes."}.get(get("recherche") or "")
         try:
-            data = players.build(user)
-        except Exception as e:  # noqa: BLE001 — stockage indisponible…
-            print(f"joueur {user} : {type(e).__name__}: {e}", flush=True)
-            return self.send_html("<p>Données du joueur momentanément indisponibles. Réessaie dans un instant.</p>", 503)
+            data, n = players.build(pid)
+        except Exception as e:  # noqa: BLE001 — stockage ou base indisponible…
+            print(f"joueur {pid} : {type(e).__name__}: {e}", flush=True)
+            return self.send_html(account.page("RLPI", "<p>Tes données sont momentanément indisponibles. "
+                                                       "Réessaie dans un instant.</p>"), 503)
         if data is None:
-            return self.send_html(f"<p>Aucune partie traitée pour « {user} » pour l'instant.</p>", 404)
+            return self.send_html(account.import_page(pid, account.import_state(pid)))
         stats = data / "features" / "player_match_stats_perso.parquet"
         args = (get("j"), get("du"), get("au"),
                 [x for x in (get("avec") or "").split(",") if x], [x for x in (get("sans") or "").split(",") if x])
-        key = ("joueur", user, args[:3], tuple(args[3]), tuple(args[4]),
+        key = ("moi", pid, args[:3], tuple(args[3]), tuple(args[4]),
                stats.stat().st_mtime if stats.exists() else 0, TEMPLATE.stat().st_mtime)
-        html = self.cache.get(key)
-        if html is None:
+        page_html = self.cache.get(key)
+        if page_html is None:
             try:
-                d = players.payload(user, data, *args)
+                d = players.payload(pid, data, *args)
             except Exception as e:  # noqa: BLE001
-                print(f"joueur {user} : {type(e).__name__}: {e}", flush=True)
-                return self.send_html("<p>Le tableau de bord de ce joueur n'a pas pu être calculé.</p>", 500)
-            html = TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", json.dumps(d, ensure_ascii=False))
-            self.cache[key] = html
-        self.send_html(html)
+                print(f"joueur {pid} : {type(e).__name__}: {e}", flush=True)
+                return self.send_html(account.page("RLPI", "<p>Ton tableau de bord n'a pas pu être calculé.</p>"), 500)
+            page_html = TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", json.dumps(d, ensure_ascii=False))
+            self.cache[key] = page_html
+        self.send_html(page_html.replace("</body>", account.toolbar(pid, n, msg) + "</body>", 1))
 
     def dashboard(self, q: dict) -> None:
         ids, names, days = roster()

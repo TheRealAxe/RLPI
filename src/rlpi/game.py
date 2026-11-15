@@ -106,6 +106,8 @@ def _steps(replay: str) -> None:
         df = pl.DataFrame(stats.extract(replay), infer_schema_length=None)
         df = df.filter((pl.col("match_type") == "Online") & (pl.col("team_size") == 3))
         res["online_3v3"] = not df.is_empty()
+        guids = [g for g in df["match_guid"].unique().to_list() if g] if "match_guid" in df.columns else []
+        res["match_guid"] = guids[0] if guids else None  # même match envoyé deux fois → même GUID
         if not df.is_empty():
             df.write_parquet(FEATURES / f"player_match_stats_{SOURCE}.parquet")
     step("stats", do_stats)
@@ -130,17 +132,20 @@ def _steps(replay: str) -> None:
 # Rassembler les parties d'un joueur
 
 
-def merge(games_dir: str | Path, into: str | Path, source: str) -> dict:
+def merge(games_dir, into: str | Path, source: str) -> dict:
     """Rassemble les dossiers de parties (sortie de `run`) en un dossier de données `into` pour la source donnée.
+
+    `games_dir` : un dossier contenant les dossiers de parties, ou directement une liste de dossiers de parties.
 
     Les tables sont reconstruites entièrement à partir des parties (on peut relancer sans risque de doublon).
     """
     import numpy as np
     import polars as pl
 
-    games_dir, into = Path(games_dir), Path(into)
+    into = Path(into)
+    dirs = sorted(p for p in Path(games_dir).iterdir()) if isinstance(games_dir, (str, Path)) else list(games_dir)
     games = []
-    for d in sorted(p for p in games_dir.iterdir() if (p / "result.json").exists()):
+    for d in (p for p in dirs if (p / "result.json").exists()):
         r = json.loads((d / "result.json").read_text(encoding="utf-8"))
         if r.get("status") in ("ok", "partiel"):
             games.append(d)

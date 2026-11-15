@@ -1,30 +1,33 @@
-"""Worker RLPI : traite les parties envoyées dans la file d'attente (version multi-joueurs, Coolify).
+"""Worker RLPI : traite les parties de la file d'attente et va chercher les nouvelles parties sur ballchasing.
 
-Circuit d'une partie :
-    1. `enqueue` dépose le replay dans le stockage S3 (Garage), crée la ligne dans Postgres (statut en_attente)
-       et ajoute une tâche dans la file Redis.
-    2. Le worker prend la tâche, télécharge le replay, lance `rlpi.game run` (processus séparé), renvoie le dossier
-       de la partie dans le stockage (users/<joueur>/games/<replay>/…) et met à jour Postgres (ok, partiel,
-       rejetee ou erreur).
-    3. Si le worker s'arrête en pleine partie (redémarrage, plantage), la tâche est remise dans la file au
-       démarrage suivant. Une partie en erreur est retentée jusqu'à 3 fois.
+Tâches de la file Redis (voir rlpi.store) :
+    {"type": "match", "match": <id>}   télécharger replays/<id>.replay, lancer rlpi.game run (processus séparé),
+                                       envoyer le résultat dans games/<id>/, noter le statut et les 6 joueurs
+                                       dans Postgres (matches, match_players)
+    {"type": "sync", "player": <id>}   chercher sur ballchasing les nouvelles parties de ce joueur (rlpi.collector)
 
-Commandes (dans le conteneur du worker) :
-    python -m rlpi.worker run                                  # boucle principale (commande par défaut de l'image)
-    python -m rlpi.worker check                                # vérifie modèles, Redis, Postgres et stockage
-    python -m rlpi.worker enqueue --user theo a.replay b.replay
-    python -m rlpi.worker enqueue --user theo --ballchasing 3  # 3 parties 3v3 classées les plus récemment
-                                                               # envoyées sur ballchasing (clé BALLCHASING_TOKEN)
-    python -m rlpi.worker enqueue --user theo --ballchasing-id <id> <id>
-    python -m rlpi.worker status [--user theo]                 # nombre de parties par statut, dernières erreurs
+En plus, toutes les RLPI_SYNC_MINUTES (défaut 15), un des workers passe sur tous les joueurs inscrits.
+Une tâche interrompue (redémarrage) est remise en file au démarrage ; une partie en erreur est retentée 3 fois.
+Un même match envoyé deux fois sur ballchasing (même GUID) n'est compté qu'une fois (statut « doublon »).
+
+Commandes (dans le conteneur du worker, ou via `docker exec <conteneur> …`) :
+    python -m rlpi.worker run                         # boucle principale (commande par défaut de l'image)
+    python -m rlpi.worker check                       # vérifie modèles, Redis, Postgres, stockage, ballchasing
+    python -m rlpi.worker add-player Steam:7656…      # inscrire un joueur sans passer par le site, puis sync
+    python -m rlpi.worker sync [--player Steam:…]     # chercher maintenant les nouvelles parties
+    python -m rlpi.worker enqueue a.replay …          # traiter des fichiers .replay
+    python -m rlpi.worker enqueue --ballchasing-id <id> …
+    python -m rlpi.worker status                      # parties par statut, dernières erreurs, joueurs inscrits
 
 Variables d'environnement :
     REDIS_URL, DATABASE_URL                       URL internes données par Coolify
-    S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY     Garage (clé rlpi-app) ; S3_BUCKET (rlpi), S3_REGION (garage)
+    S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY     Garage ; S3_BUCKET (rlpi), S3_REGION (garage)
+    BALLCHASING_TOKEN                             clé API ballchasing du serveur (recherche des parties)
     RLPI_MODELS                                   dossier des modèles (/app/models dans l'image)
+    RLPI_SYNC_MINUTES                             intervalle des recherches automatiques (défaut 15, 0 = jamais)
+    RLPI_FIRST_SYNC                               parties importées au premier passage d'un joueur (défaut 50)
     RLPI_KEEP_REPLAYS                             1 (défaut) garde le .replay dans le stockage, 0 le supprime
     RLPI_GAME_TIMEOUT                             durée maximale d'une partie en secondes (défaut 900)
-    BALLCHASING_TOKEN                             facultatif, seulement pour enqueue --ballchasing
 """
 from __future__ import annotations
 
@@ -39,88 +42,17 @@ import tempfile
 import time
 from pathlib import Path
 
-QUEUE = "rlpi:queue"
-PROCESSING = "rlpi:processing:"  # + identifiant du worker
+from rlpi import collector, store
+from rlpi.store import PROCESSING, QUEUE, safe
+
 MAX_ATTEMPTS = 3
 HEARTBEAT = Path(tempfile.gettempdir()) / "rlpi_worker_heartbeat"
 REQUIRED_MODELS = ["value_h5.txt", "policy_touch.txt", "q_touch.txt", "placement_x.txt", "placement_y.txt",
                    "perf_reference.npz"]
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS games (
-    user_id     text        NOT NULL,
-    replay      text        NOT NULL,
-    status      text        NOT NULL,   -- en_attente, en_cours, ok, partiel, rejetee, erreur
-    replay_key  text,
-    result      jsonb,
-    error       text,
-    wall_s      real,
-    worker      text,
-    attempts    integer     NOT NULL DEFAULT 0,
-    created_at  timestamptz NOT NULL DEFAULT now(),
-    updated_at  timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (user_id, replay)
-);
-CREATE INDEX IF NOT EXISTS games_status ON games (status);
-"""
-
 
 def log(msg: str) -> None:
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}", flush=True)
-
-
-def env(name: str, default: str | None = None) -> str:
-    v = os.getenv(name, default)
-    # Espaces et guillemets collés par erreur avec la valeur dans Coolify
-    v = str(v).strip().strip("\"'").strip() if v is not None else ""
-    if not v:
-        raise SystemExit(f"Variable d'environnement manquante : {name}")
-    return v
-
-
-def url(name: str, schemes: tuple[str, ...]) -> str:
-    """Lit une URL de connexion et vérifie son début, sans jamais afficher la valeur (elle contient un mot de passe)."""
-    v = env(name)
-    if not v.startswith(schemes):
-        start = v.split("://")[0][:12] if "://" in v else "(pas de « :// »)"
-        raise SystemExit(f"{name} doit commencer par {' ou '.join(schemes)} ; elle commence par : {start} "
-                         f"({len(v)} caractères). Copier l'URL « internal » avec l'icône de copie dans Coolify.")
-    return v
-
-
-# --------------------------------------------------------------------------------------------------------------
-# Connexions
-
-
-def redis_client():
-    import redis
-
-    return redis.Redis.from_url(url("REDIS_URL", ("redis://", "rediss://")), decode_responses=True,
-                                socket_timeout=60, socket_connect_timeout=10, health_check_interval=30)
-
-
-def db():
-    import psycopg
-
-    return psycopg.connect(url("DATABASE_URL", ("postgres://", "postgresql://")), autocommit=True)
-
-
-def s3():
-    import boto3
-    from botocore.config import Config
-
-    endpoint = env("S3_ENDPOINT").rstrip("/")
-    if not endpoint.startswith(("http://", "https://")) or " " in endpoint:
-        # L'adresse ne contient pas de secret : on peut l'afficher pour aider à la corriger
-        raise SystemExit(f"S3_ENDPOINT invalide : « {endpoint} ». Attendu : http://<nom du conteneur Garage>:3900, "
-                         "par exemple http://garage-fj4rezthgm9pyk3rggqpjsw6:3900")
-    return boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=env("S3_ACCESS_KEY"),
-                        aws_secret_access_key=env("S3_SECRET_KEY"), region_name=env("S3_REGION", "garage"),
-                        config=Config(s3={"addressing_style": "path"}, retries={"max_attempts": 5}))
-
-
-def bucket() -> str:
-    return env("S3_BUCKET", "rlpi")
 
 
 def models_dir() -> Path:
@@ -129,59 +61,42 @@ def models_dir() -> Path:
     return MODELS
 
 
-def safe(s: str) -> str:
-    """Identifiant utilisable dans une clé de stockage."""
-    return "".join(c if c.isalnum() or c in "-_." else "_" for c in s)[:120] or "_"
-
-
 # --------------------------------------------------------------------------------------------------------------
-# Envoi d'une partie dans la file
+# Mise en file manuelle
 
 
-def enqueue(user: str, files: list[str]) -> None:
-    r, cli, b = redis_client(), s3(), bucket()
-    user = safe(user)
-    with db() as conn:
-        conn.execute(SCHEMA)
-        for f in map(Path, files):
-            if f.suffix.lower() != ".replay" or not f.is_file():
-                log(f"ignoré (pas un fichier .replay) : {f}")
-                continue
-            key = f"users/{user}/replays/{safe(f.name)}"
-            cli.upload_file(str(f), b, key)
-            conn.execute(
-                """INSERT INTO games (user_id, replay, status, replay_key) VALUES (%s, %s, 'en_attente', %s)
-                   ON CONFLICT (user_id, replay) DO UPDATE
-                   SET status = 'en_attente', replay_key = EXCLUDED.replay_key, error = NULL, attempts = 0,
-                       updated_at = now()""",
-                (user, f.stem, key))
-            r.lpush(QUEUE, json.dumps({"user": user, "replay": f.stem, "key": key}))
-            log(f"en file : {user}/{f.name}")
+def enqueue_files(files: list[str]) -> None:
+    r, cli, b, conn = store.redis_client(), store.s3(), store.bucket(), store.db()
+    for f in map(Path, files):
+        if f.suffix.lower() != ".replay" or not f.is_file():
+            log(f"ignoré (pas un fichier .replay) : {f}")
+            continue
+        mid = safe(f.stem)
+        key = f"replays/{mid}.replay"
+        cli.upload_file(str(f), b, key)
+        conn.execute("""INSERT INTO matches (id, source, status, replay_key) VALUES (%s, 'fichier', 'en_attente', %s)
+                        ON CONFLICT (id) DO UPDATE SET status = 'en_attente', error = NULL, attempts = 0,
+                        updated_at = now()""", (mid, key))
+        store.push_match(r, mid)
+        log(f"en file : {mid}")
 
 
-def enqueue_ballchasing(user: str, n: int = 0, ids: list[str] | None = None) -> None:
-    """Télécharge des replays ballchasing puis les met en file. Utile pour tester sans copier de fichier sur le
-    serveur. `ids` : identifiants de replays (publics, ou envoyés par le titulaire de la clé) ; `n` : les n parties
-    3v3 classées les plus récemment envoyées par le titulaire de la clé API (BALLCHASING_TOKEN)."""
+def enqueue_ballchasing(ids: list[str]) -> None:
     from rlpi.config import ballchasing_api
 
-    api = ballchasing_api()
-    tmp = Path(tempfile.mkdtemp(prefix="rlpi_bc_"))
+    api, tmp = ballchasing_api(), Path(tempfile.mkdtemp(prefix="rlpi_bc_"))
     try:
-        todo = list(ids or [])
-        if n:
-            # « created » = date d'envoi sur ballchasing (l'API refuse « upload-date »)
-            todo += [r["id"] for r in api.get_replays(uploader="me", playlist="ranked-standard", sort_by="created",
-                                                      count=n)]
-        files = []
-        for rid in todo:
-            files.append(str(api.download_replay(rid, tmp)))
-            log(f"téléchargé depuis ballchasing : {rid}")
-        if not files:
-            log("aucune partie trouvée sur ballchasing")
-        enqueue(user, files)
+        enqueue_files([str(api.download_replay(i, tmp)) for i in ids])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def add_player(player_id: str, name: str | None = None) -> None:
+    conn, r = store.db(), store.redis_client()
+    conn.execute("INSERT INTO accounts (player_id, name) VALUES (%s, %s) ON CONFLICT (player_id) DO NOTHING",
+                 (player_id, name))
+    store.push_sync(r, player_id)
+    log(f"joueur inscrit : {player_id} ; recherche de ses parties en file")
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -195,13 +110,14 @@ class Worker:
         self.stop = False
         self.keep_replays = os.getenv("RLPI_KEEP_REPLAYS", "1").strip() != "0"
         self.timeout = float(os.getenv("RLPI_GAME_TIMEOUT", "900"))
-        self.r, self.s3, self.bucket = redis_client(), s3(), bucket()
-        self.conn = db()
-        self.conn.execute(SCHEMA)
+        self.sync_every = float(os.getenv("RLPI_SYNC_MINUTES", "15")) * 60
+        self.last_sync = 0.0
+        self.r, self.s3, self.bucket = store.redis_client(), store.s3(), store.bucket()
+        self.conn = store.db()
 
-    # Arrêt propre : Coolify envoie SIGTERM au redéploiement ; on finit la partie en cours.
+    # Arrêt propre : Coolify envoie SIGTERM au redéploiement ; on finit la tâche en cours.
     def _on_signal(self, *_):
-        log("arrêt demandé : fin de la partie en cours puis sortie")
+        log("arrêt demandé : fin de la tâche en cours puis sortie")
         self.stop = True
 
     def recover(self) -> None:
@@ -212,14 +128,13 @@ class Worker:
         if n:
             log(f"{n} tâche(s) interrompue(s) remise(s) dans la file")
 
-    def set_status(self, task: dict, status: str, **fields) -> None:
+    def set_status(self, mid: str, status: str, **fields) -> None:
         from psycopg.types.json import Jsonb
 
-        cols = ", ".join(f"{k} = %s" for k in fields)
+        cols = "".join(f", {k} = %s" for k in fields)
         vals = [Jsonb(v) if k == "result" else v for k, v in fields.items()]
-        self.conn.execute(
-            f"UPDATE games SET status = %s{', ' + cols if cols else ''}, worker = %s, updated_at = now() "
-            "WHERE user_id = %s AND replay = %s", [status, *vals, self.id, task["user"], task["replay"]])
+        self.conn.execute(f"UPDATE matches SET status = %s{cols}, worker = %s, updated_at = now() WHERE id = %s",
+                          [status, *vals, self.id, mid])
 
     def upload_dir(self, local: Path, prefix: str) -> int:
         n = 0
@@ -229,50 +144,78 @@ class Worker:
                 n += 1
         return n
 
-    def process(self, raw: str) -> None:
+    def requeue(self, raw: str, attempts: int) -> None:
+        if attempts < MAX_ATTEMPTS:
+            self.r.lpush(QUEUE, raw)
+            log(f"  remise en file ({attempts}/{MAX_ATTEMPTS})")
+            time.sleep(5)
+
+    def process_match(self, raw: str, mid: str) -> None:
         from rlpi import game
 
-        task = json.loads(raw)
-        user, replay, key = task["user"], task["replay"], task["key"]
-        row = self.conn.execute("UPDATE games SET status = 'en_cours', attempts = attempts + 1, worker = %s, "
-                                "updated_at = now() WHERE user_id = %s AND replay = %s RETURNING attempts",
-                                (self.id, user, replay)).fetchone()
-        attempts = row[0] if row else 1
-        log(f"début {user}/{replay} (essai {attempts})")
+        row = self.conn.execute("UPDATE matches SET status = 'en_cours', attempts = attempts + 1, worker = %s, "
+                                "updated_at = now() WHERE id = %s RETURNING attempts, replay_key",
+                                (self.id, mid)).fetchone()
+        if row is None:
+            log(f"partie inconnue dans Postgres, ignorée : {mid}")
+            return
+        attempts, key = row
+        log(f"début {mid} (essai {attempts})")
         tmp = Path(tempfile.mkdtemp(prefix="rlpi_"))
         try:
-            local = tmp / f"{replay}.replay"
+            local = tmp / f"{mid}.replay"
             self.s3.download_file(self.bucket, key, str(local))
             out = tmp / "partie"
             res = game.run(local, out, models_dir(), timeout=self.timeout)
-            prefix = f"users/{user}/games/{safe(replay)}"
-            n = self.upload_dir(out, prefix)
             status = res["status"] if res["status"] in ("ok", "partiel", "rejetee") else "erreur"
+            guid = res.get("match_guid")
+            if status in ("ok", "partiel") and guid:
+                dup = self.conn.execute("SELECT id FROM matches WHERE match_guid = %s AND id <> %s AND status IN "
+                                        "('ok', 'partiel')", (guid, mid)).fetchone()
+                if dup:
+                    status = "doublon"
+                    res["doublon_de"] = dup[0]
+            n = self.upload_dir(out, f"games/{mid}") if status in ("ok", "partiel") else 0
             err = res.get("reason") or (json.dumps(res["errors"], ensure_ascii=False) if res.get("errors") else None)
             if status == "erreur":
                 err = res.get("error", "erreur inconnue")[-2000:]
             summary = {k: v for k, v in res.items() if not k.startswith("traceback_")}
-            self.set_status(task, status, result=summary, error=err, wall_s=res.get("wall_s"))
-            if status in ("ok", "partiel", "rejetee") and not self.keep_replays:
+            self.set_status(mid, status, result=summary, error=err, wall_s=res.get("wall_s"), match_guid=guid,
+                            played_at=res.get("date"))
+            if status in ("ok", "partiel"):
+                self.conn.execute("DELETE FROM match_players WHERE match_id = %s", (mid,))
+                for p in res.get("players", []):
+                    self.conn.execute("INSERT INTO match_players (match_id, player_id, player_name, team) "
+                                      "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                                      (mid, p["id"], p.get("name"), p.get("team")))
+            if status != "erreur" and not self.keep_replays:
                 self.s3.delete_object(Bucket=self.bucket, Key=key)
-            log(f"fin {user}/{replay} : {status} en {res.get('wall_s')} s, {n} fichiers envoyés"
+            log(f"fin {mid} : {status} en {res.get('wall_s')} s, {n} fichiers envoyés"
                 + (f" — {err[:200]}" if err else ""))
-            if status == "erreur" and attempts < MAX_ATTEMPTS:
-                self.r.lpush(QUEUE, raw)
-                log(f"  remise en file ({attempts}/{MAX_ATTEMPTS})")
+            if status == "erreur":
+                self.requeue(raw, attempts)
         except Exception as e:  # noqa: BLE001 — stockage ou base indisponible, replay introuvable…
             msg = f"{type(e).__name__}: {e}"[:2000]
-            log(f"échec {user}/{replay} : {msg}")
+            log(f"échec {mid} : {msg}")
             try:
-                self.set_status(task, "erreur", error=msg)
+                self.set_status(mid, "erreur", error=msg)
             except Exception as e2:  # noqa: BLE001
                 log(f"  impossible de noter l'erreur dans Postgres : {e2}")
-            if attempts < MAX_ATTEMPTS:
-                self.r.lpush(QUEUE, raw)
-                log(f"  remise en file ({attempts}/{MAX_ATTEMPTS})")
-                time.sleep(5)
+            self.requeue(raw, attempts)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    def process(self, raw: str) -> None:
+        task = json.loads(raw)
+        if task.get("type") == "sync":
+            try:
+                collector.sync_player(task["player"], log, self.conn, self.r, self.s3)
+            except Exception as e:  # noqa: BLE001
+                log(f"sync {task['player']} : échec {type(e).__name__}: {e}"[:500])
+        elif task.get("type") == "match":
+            self.process_match(raw, task["match"])
+        else:
+            log(f"tâche inconnue ignorée : {raw[:200]}")
 
     def run(self) -> None:
         signal.signal(signal.SIGTERM, self._on_signal)
@@ -281,9 +224,16 @@ class Worker:
         if missing:
             raise SystemExit(f"Modèles manquants dans {models_dir()} : {', '.join(missing)}")
         self.recover()
-        log(f"worker {self.id} prêt (modèles : {models_dir()}, file : {QUEUE})")
+        log(f"worker {self.id} prêt (modèles : {models_dir()}, recherche ballchasing toutes les "
+            f"{self.sync_every / 60:.0f} min)")
         while not self.stop:
             HEARTBEAT.touch()
+            if self.sync_every and time.time() - self.last_sync > self.sync_every and os.getenv("BALLCHASING_TOKEN"):
+                self.last_sync = time.time()
+                try:
+                    collector.sync_all(log, self.conn, self.r)
+                except Exception as e:  # noqa: BLE001
+                    log(f"recherche automatique : échec {type(e).__name__}: {e}"[:500])
             raw = self.r.blmove(QUEUE, self.processing, timeout=20, src="RIGHT", dest="LEFT")
             if raw is None:
                 continue
@@ -308,47 +258,58 @@ def check() -> None:
             log(f"ÉCHEC   {name} : {type(e).__name__}: {e}")
 
     def models():
+        import subtr_actor  # noqa: F401 — le parseur de replays est installé
+
         missing = [m for m in REQUIRED_MODELS if not (models_dir() / m).exists()]
         if missing:
             raise FileNotFoundError(f"manquants dans {models_dir()} : {', '.join(missing)}")
         return f"{len(REQUIRED_MODELS)} fichiers présents dans {models_dir()}"
 
     def red():
-        r = redis_client()
+        r = store.redis_client()
         r.ping()
         return f"connecté, {r.llen(QUEUE)} tâche(s) en file"
 
     def pg():
-        with db() as c:
-            c.execute(SCHEMA)
-            return f"connecté, {c.execute('SELECT count(*) FROM games').fetchone()[0]} partie(s) en base"
+        with store.db() as c:
+            n = c.execute("SELECT count(*) FROM matches").fetchone()[0]
+            a = c.execute("SELECT count(*) FROM accounts").fetchone()[0]
+            return f"connecté, {n} partie(s), {a} joueur(s) inscrit(s)"
 
-    def store():
-        cli, b = s3(), bucket()
+    def stockage():
+        cli, b = store.s3(), store.bucket()
         cli.put_object(Bucket=b, Key="_check/ping.txt", Body=b"ok")
         cli.delete_object(Bucket=b, Key="_check/ping.txt")
         return f"bucket {b} : écriture et suppression OK"
 
-    import subtr_actor  # noqa: F401 — vérifie que le parseur est installé
+    def ballchasing():
+        from rlpi.config import ballchasing_api
+
+        info = ballchasing_api().ping()
+        return f"clé valide (compte {info.get('name')}, abonné : {'oui' if info.get('chaser') else 'non'})"
+
     line("modèles", models)
     line("Redis", red)
     line("Postgres", pg)
-    line("stockage", store)
+    line("stockage", stockage)
+    line("ballchasing", ballchasing)
     sys.exit(0 if ok else 1)
 
 
-def status(user: str | None) -> None:
-    with db() as c:
-        c.execute(SCHEMA)
-        where, args = ("WHERE user_id = %s", [safe(user)]) if user else ("", [])
-        for st, n, avg in c.execute(f"SELECT status, count(*), avg(wall_s) FROM games {where} GROUP BY status "
-                                    "ORDER BY status", args).fetchall():
+def status() -> None:
+    with store.db() as c:
+        for st, n, avg in c.execute("SELECT status, count(*), avg(wall_s) FROM matches GROUP BY status "
+                                    "ORDER BY status").fetchall():
             log(f"{st:<11} {n:>5} partie(s)" + (f", {avg:.1f} s en moyenne" if avg else ""))
-        for u, rp, st, err in c.execute(f"SELECT user_id, replay, status, error FROM games {where} "
-                                        f"{'AND' if where else 'WHERE'} error IS NOT NULL "
-                                        "ORDER BY updated_at DESC LIMIT 5", args).fetchall():
-            log(f"  {u}/{rp} [{st}] {err[:200]}")
-    log(f"file Redis : {redis_client().llen(QUEUE)} tâche(s) en attente")
+        for mid, st, err in c.execute("SELECT id, status, error FROM matches WHERE error IS NOT NULL "
+                                      "ORDER BY updated_at DESC LIMIT 5").fetchall():
+            log(f"  {mid} [{st}] {err[:200]}")
+        for pid, name, last, n in c.execute(
+                "SELECT a.player_id, a.name, a.last_sync, (SELECT count(*) FROM match_players mp JOIN matches m "
+                "ON m.id = mp.match_id WHERE mp.player_id = a.player_id AND m.status IN ('ok', 'partiel')) "
+                "FROM accounts a ORDER BY a.created_at").fetchall():
+            log(f"joueur {pid} ({name or '?'}) : {n} partie(s) traitée(s), dernière recherche {last or 'jamais'}")
+    log(f"file Redis : {store.redis_client().llen(QUEUE)} tâche(s) en attente")
 
 
 def main() -> None:
@@ -356,28 +317,34 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("run")
     sub.add_parser("check")
+    sub.add_parser("status")
+    s = sub.add_parser("add-player")
+    s.add_argument("player_id", help="identifiant comme dans les replays, ex. Steam:76561198078330309")
+    s.add_argument("--name")
+    s = sub.add_parser("sync")
+    s.add_argument("--player", help="un seul joueur (sinon tous)")
     s = sub.add_parser("enqueue")
-    s.add_argument("--user", required=True, help="identifiant du joueur (dossier dans le stockage)")
     s.add_argument("files", nargs="*")
-    s.add_argument("--ballchasing", type=int, metavar="N", default=0,
-                   help="mettre en file les N parties classées 3v3 les plus récemment envoyées sur ballchasing")
     s.add_argument("--ballchasing-id", nargs="+", default=[], metavar="ID", help="identifiants de replays ballchasing")
-    s = sub.add_parser("status")
-    s.add_argument("--user")
     a = ap.parse_args()
     if a.cmd in (None, "run"):
         Worker().run()
     elif a.cmd == "check":
         check()
-    elif a.cmd == "enqueue":
-        if a.ballchasing or a.ballchasing_id:
-            enqueue_ballchasing(a.user, a.ballchasing, a.ballchasing_id)
-        if a.files:
-            enqueue(a.user, a.files)
-        if not (a.files or a.ballchasing or a.ballchasing_id):
-            ap.error("donner des fichiers .replay, --ballchasing N ou --ballchasing-id ID…")
+    elif a.cmd == "status":
+        status()
+    elif a.cmd == "add-player":
+        add_player(a.player_id, a.name)
+    elif a.cmd == "sync":
+        n = collector.sync_player(a.player, log) if a.player else collector.sync_all(log)
+        log(f"{n} partie(s) mise(s) en file")
     else:
-        status(a.user)
+        if not (a.files or a.ballchasing_id):
+            ap.error("donner des fichiers .replay ou --ballchasing-id ID…")
+        if a.ballchasing_id:
+            enqueue_ballchasing(a.ballchasing_id)
+        if a.files:
+            enqueue_files(a.files)
 
 
 if __name__ == "__main__":

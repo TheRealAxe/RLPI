@@ -260,25 +260,38 @@ Sans accès SSH, le plus simple est de passer par ballchasing (variable `BALLCHA
 Avec un accès SSH, on peut aussi copier des fichiers : `docker cp <dossier> <conteneur_du_worker>:/tmp/replays`
 puis `python -m rlpi.worker enqueue --user theo /tmp/replays/*.replay`.
 
-### B6 bis. Pages joueurs sur le tableau de bord
+### B6 bis. Comptes joueurs (connexion Steam) et récupération automatique sur ballchasing
 
-Le serveur du tableau de bord (application `docker-image-a1dvrpm…`, domaine `rlpi.lainox.quest`) affiche le
-tableau de bord d'un joueur à partir de ses parties traitées par les workers : `https://rlpi.lainox.quest/joueur/<joueur>`
-(ex. `/joueur/theo`, le nom donné à `enqueue --user`).
+Fonctionnement (2026-11-15) :
+- un joueur se connecte sur `https://rlpi.lainox.quest/moi` avec son compte Steam ; son SteamID est l'identifiant
+  des replays, aucun pseudo à saisir ;
+- à l'inscription, puis toutes les 15 minutes, les workers cherchent sur ballchasing (avec la clé du serveur) les
+  parties 3v3 classées et non classées où figure ce joueur, **quel que soit celui qui les a envoyées** ; premier
+  passage : ses 50 parties les plus récemment envoyées ;
+- chaque partie n'est traitée qu'une fois (un même match envoyé par deux joueurs → « doublon ») et appartient à ses
+  6 joueurs : chaque inscrit voit toutes ses parties, même avec des coéquipiers différents ;
+- sur sa page, le bouton « Chercher mes nouvelles parties » lance une recherche immédiate (une fois par 5 minutes).
 
-1. Dans l'application du tableau de bord → *Environment Variables*, ajouter les mêmes variables de stockage que
-   le worker : `S3_ENDPOINT` (`http://garage-fj4rezthgm9pyk3rggqpjsw6:3900`, tapé à la main), `S3_ACCESS_KEY`,
-   `S3_SECRET_KEY`, `S3_BUCKET` (`rlpi`), `S3_REGION` (`garage`). *Save*, *Redeploy*.
-2. Ouvrir `https://rlpi.lainox.quest/joueur/theo`. Le premier affichage prend quelques secondes (téléchargement des
-   parties, regroupement, calcul) ; les suivants sont immédiats tant qu'aucune partie n'arrive.
-3. Les parties du joueur sont gardées dans le volume du tableau de bord (`/app/data/users/<joueur>/`), environ
-   1 Mo par partie.
+1. **Worker** (`rlpi-worker-1`) → *Environment Variables* : `BALLCHASING_TOKEN` = clé API ballchasing du serveur
+   (obligatoire désormais). Facultatif : `RLPI_SYNC_MINUTES` (15), `RLPI_FIRST_SYNC` (50). *Redeploy*.
+2. **Tableau de bord** (`docker-image-a1dvrpm…`) → *Environment Variables* :
+   | Variable | Valeur |
+   |---|---|
+   | `DATABASE_URL`, `REDIS_URL` | mêmes valeurs que le worker (URL internes, copiées avec l'icône) |
+   | `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_REGION` | mêmes valeurs que le worker |
+   | `RLPI_PUBLIC_URL` | `https://rlpi.lainox.quest` |
+   | `RLPI_SECRET` | longue chaîne aléatoire, à générer dans le terminal serveur : `openssl rand -hex 32` |
+   *Save*, *Redeploy*. (`RLPI_SECRET` signe les sessions : la changer déconnecte tout le monde.)
+3. Vérifier dans le terminal serveur : `docker exec <worker> python -m rlpi.worker check` → 5 lignes OK
+   (dont « ballchasing »).
+4. Ouvrir `https://rlpi.lainox.quest/moi` → *Se connecter avec Steam* → page « Import de tes parties » (mise à
+   jour toute seule) → le tableau de bord apparaît dès la première partie traitée et se complète au fil de l'import.
+   Avec un seul worker, 50 parties ≈ 20 à 30 minutes.
+5. Suivi : `docker exec <worker> python -m rlpi.worker status` (parties par statut, joueurs inscrits).
+   Inscrire un joueur sans le site : `python -m rlpi.worker add-player Steam:7656…`.
 
-Joueur suivi : celui qui apparaît dans le plus de parties ; coéquipiers comparés : les 2 plus fréquents (au moins
-5 parties ensemble). Pour forcer un autre choix, déposer dans le stockage `users/<joueur>/profile.json` :
-`{"player": "<pseudo ou identifiant>", "compare": ["<pseudo>", "<pseudo>"]}`.
-
-⚠️ Aucune connexion n'est demandée pour l'instant : quiconque connaît l'adresse `/joueur/<joueur>` voit la page.
+Le tableau de bord doit joindre `rlpi-db`, `rlpi-queue` et Garage comme le worker (même réseau Coolify).
+Les données du premier test (`users/theo/…` dans Garage, table `games` dans Postgres) ne sont plus utilisées.
 
 ### B7. Surveillance au quotidien
 

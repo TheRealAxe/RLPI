@@ -755,3 +755,26 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
 - Limites : pas de connexion (page visible par qui connaît l'adresse) ; actions à revoir (bestplay worst) et pages
   annexes (swipe, fantôme, modèles) restent celles de Théo ; la phrase de validité de l'indice cite les chiffres
   des parties de Théo (perf_report.json).
+
+## 2026-11-15 — Comptes Steam, parties par joueur, récupération ballchasing
+
+- Décisions de Théo : connexion uniquement par Steam (SteamID = identifiant des replays) ; les replays arrivent par
+  ballchasing (pas d'envoi direct pour l'instant) ; recherche avec la clé ballchasing de Théo (compte « chaser »).
+- Nouvelle organisation (`rlpi.store`) : une partie = une ligne `matches` (identifiant ballchasing), traitée une
+  fois, stockée dans `games/<id>/` ; `match_players` relie chaque partie à ses 6 joueurs ; `accounts` = inscrits.
+  Doublons (même match envoyé deux fois) repérés par le GUID après traitement (`game.run` renvoie `match_guid`).
+- `rlpi.collector` : recherche par `player-id=steam:…` (vérifié : 3 281 parties pour Théo, toutes sources),
+  listes `ranked-standard` + `unranked-standard`, tri `created` ; premier passage limité à 50 parties
+  (`RLPI_FIRST_SYNC`), ensuite seulement les nouvelles (`created-after`). Toutes les 15 min (verrou Redis) et à
+  l'inscription.
+- `rlpi.worker` réécrit : tâches `match` et `sync`, commandes `add-player`, `sync`, `status` (joueurs inscrits),
+  `check` (+ clé ballchasing).
+- `rlpi.account` + `serve.py` : `/connexion` (OpenID Steam, vérification `check_authentication`), cookie de session
+  signé HMAC (`RLPI_SECRET`, 30 jours), `/moi` (tableau de bord du joueur connecté ou page d'import qui se met à
+  jour), POST `/moi/actualiser` (1 fois / 5 min), `/deconnexion`. Route `/joueur/<joueur>` supprimée.
+- `rlpi.players` : parties du joueur lues dans `match_players`, cache partagé des parties, joueur suivi = le compte
+  (plus de détection), coéquipiers comparés = les 2 plus fréquents (≥ 5 parties ensemble).
+- Tests locaux (base et stockage simulés, 11 parties) : page de LAinox centrée sur LAinox (Axe et Rileq comparés),
+  cookie falsifié refusé, réponse Steam forgée refusée, routes et bandeau OK. Non testé : Postgres, Redis, Garage et
+  Steam réels (à valider sur le serveur, étape B6 bis).
+- Point à vérifier : conditions d'utilisation de l'API ballchasing pour un service à plusieurs utilisateurs.

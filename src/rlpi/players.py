@@ -1,21 +1,18 @@
 """Espace joueur (version multi-joueurs) : rassembler les parties d'un joueur et calculer son tableau de bord.
 
-Les parties traitées par les workers sont dans le stockage S3 (Garage) :
-    users/<joueur>/games/<replay>/frames/partie/…, features/…_partie.*, result.json
-    users/<joueur>/profile.json      facultatif : {"player": "<identifiant en jeu>", "compare": ["…", "…"]}
+Les parties d'un joueur sont toutes celles où figure son identifiant (table Postgres match_players), quels que
+soient ses coéquipiers et celui qui a envoyé le replay. Leur traitement est dans le stockage S3 : games/<partie>/…
 
 Ce module, utilisé par le serveur du tableau de bord (rlpi.serve) :
-    1. télécharge les parties nouvelles ou modifiées dans un cache local (<cache>/<joueur>/games/) ;
-    2. les rassemble (rlpi.game merge) dans <cache>/<joueur>/data, source « perso », à côté de liens vers les
-       données de référence (RLCS, SSL, rapports des modèles) du dossier de données principal ;
+    1. télécharge les parties manquantes dans un cache local partagé (<cache>/games/<partie>/) ;
+    2. les rassemble (rlpi.game merge) dans <cache>/players/<joueur>/data, source « perso », à côté de liens vers
+       les données de référence (RLCS, SSL, rapports des modèles) du dossier de données principal ;
     3. calcule la synergie du joueur, puis le contenu du tableau de bord, dans un processus séparé où
        RLPI_DATA pointe sur ce dossier (le code du tableau de bord reste inchangé).
 
-    python -m rlpi.players sync --user theo          # rassembler (télécharge depuis le stockage)
-    python -m rlpi.players payload --user theo       # contenu du tableau de bord (JSON) — interne
+    python -m rlpi.players sync --player Steam:7656…     # rassembler (test, en ligne de commande)
 
-Variables : S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET, S3_REGION (comme le worker),
-RLPI_USERS_CACHE (défaut : <données>/users).
+Variables : DATABASE_URL, S3_* (comme le worker), RLPI_USERS_CACHE (défaut : <données>/users).
 """
 from __future__ import annotations
 
@@ -26,17 +23,19 @@ import shutil
 import subprocess
 import sys
 import threading
-from collections import Counter
 from pathlib import Path
 
+from rlpi import store
+
 USER_SOURCE = "perso"  # nom de la source dans le dossier de données d'un joueur
+MIN_GAMES_TOGETHER = 5  # coéquipier comparé : au moins 5 parties ensemble
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
 
 def enabled() -> bool:
-    """Le mode multi-joueurs est actif si le stockage est configuré."""
-    return bool(os.getenv("S3_ENDPOINT", "").strip())
+    """Le mode multi-joueurs est actif si la base et le stockage sont configurés."""
+    return bool(os.getenv("S3_ENDPOINT", "").strip() and os.getenv("DATABASE_URL", "").strip())
 
 
 def cache_root() -> Path:
@@ -45,68 +44,40 @@ def cache_root() -> Path:
     return Path(os.getenv("RLPI_USERS_CACHE") or DATA / "users")
 
 
-def safe(s: str) -> str:
-    from rlpi.worker import safe as _safe
-
-    return _safe(s)
-
-
-def lock(user: str) -> threading.Lock:
+def lock(key: str) -> threading.Lock:
     with _locks_guard:
-        return _locks.setdefault(user, threading.Lock())
+        return _locks.setdefault(key, threading.Lock())
 
 
 # --------------------------------------------------------------------------------------------------------------
-# 1. Téléchargement des parties
+# 1. Parties du joueur
 
 
-def list_games(cli, bucket: str, user: str) -> dict[str, dict[str, str]]:
-    """{replay: {clé relative: etag}} pour toutes les parties du joueur dans le stockage."""
-    prefix = f"users/{user}/games/"
-    games: dict[str, dict[str, str]] = {}
-    for page in cli.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
-        for o in page.get("Contents", []):
-            rel = o["Key"][len(prefix):]
-            if "/" not in rel:
-                continue
-            replay, rest = rel.split("/", 1)
-            games.setdefault(replay, {})[rest] = o["ETag"]
-    return games
+def player_matches(player_id: str) -> dict[str, str]:
+    """{partie: date de dernière mise à jour} des parties traitées où figure le joueur."""
+    with store.db() as c:
+        rows = c.execute("SELECT m.id, m.updated_at FROM match_players mp JOIN matches m ON m.id = mp.match_id "
+                         "WHERE mp.player_id = %s AND m.status IN ('ok', 'partiel')", (player_id,)).fetchall()
+    return {mid: upd.isoformat() for mid, upd in rows}
 
 
-def download(user: str) -> tuple[Path, bool]:
-    """Met le cache local à jour. Retourne (dossier des parties, True si quelque chose a changé)."""
-    from rlpi.worker import bucket, s3
-
-    cli, b = s3(), bucket()
-    root = cache_root() / user
-    gdir = root / "games"
-    gdir.mkdir(parents=True, exist_ok=True)
-    manifest_f = root / "manifest.json"
-    old = json.loads(manifest_f.read_text(encoding="utf-8")) if manifest_f.exists() else {}
-    remote = list_games(cli, b, user)
-    changed = False
-    for replay, files in remote.items():
-        if old.get(replay) == files and (gdir / replay / "result.json").exists():
-            continue
-        dest = gdir / replay
+def fetch_game(cli, b: str, mid: str, version: str) -> Path:
+    """Télécharge games/<partie>/ dans le cache partagé si absent ou retraité depuis."""
+    dest = cache_root() / "games" / store.safe(mid)
+    stamp = dest / ".version"
+    if stamp.exists() and stamp.read_text(encoding="utf-8") == version:
+        return dest
+    with lock("game:" + mid):
         shutil.rmtree(dest, ignore_errors=True)
-        for rel in files:
-            f = dest / rel
-            f.parent.mkdir(parents=True, exist_ok=True)
-            cli.download_file(b, f"users/{user}/games/{replay}/{rel}", str(f))
-        changed = True
-    for replay in set(old) - set(remote):  # partie supprimée du stockage
-        shutil.rmtree(gdir / replay, ignore_errors=True)
-        changed = True
-    if changed or not manifest_f.exists():
-        manifest_f.write_text(json.dumps(remote), encoding="utf-8")
-    try:
-        obj = cli.get_object(Bucket=b, Key=f"users/{user}/profile.json")
-        (root / "profile.json").write_bytes(obj["Body"].read())
-    except cli.exceptions.NoSuchKey:
-        (root / "profile.json").unlink(missing_ok=True)
-    return gdir, changed
+        prefix = f"games/{mid}/"
+        for page in cli.get_paginator("list_objects_v2").paginate(Bucket=b, Prefix=prefix):
+            for o in page.get("Contents", []):
+                f = dest / o["Key"][len(prefix):]
+                f.parent.mkdir(parents=True, exist_ok=True)
+                cli.download_file(b, o["Key"], str(f))
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(version, encoding="utf-8")
+    return dest
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -135,7 +106,7 @@ def link_reference(data: Path, ref: Path, own_sources: set[str]) -> None:
     """Relie les données de référence (tout ce qui n'est pas une source « joueur ») dans le dossier du joueur."""
     def own(name: str) -> bool:
         stem = name.split(".")[0]
-        return any(stem.endswith(f"_{s}") for s in own_sources) or name in own_sources
+        return name in own_sources or any(stem.endswith(f"_{s}") for s in own_sources)
 
     (data / "features").mkdir(parents=True, exist_ok=True)
     (data / "frames").mkdir(parents=True, exist_ok=True)
@@ -143,28 +114,35 @@ def link_reference(data: Path, ref: Path, own_sources: set[str]) -> None:
         if not own(f.name):
             _link(f, data / "features" / f.name)
     for f in (ref / "frames").iterdir():
-        if not own(f.name) and f.name not in own_sources:
+        if not own(f.name):
             _link(f, data / "frames" / f.name)
 
 
-def build(user: str, force: bool = False) -> Path | None:
-    """Télécharge et rassemble les parties du joueur. Retourne son dossier de données (None : aucune partie)."""
+def build(player_id: str, force: bool = False) -> tuple[Path | None, int]:
+    """Rassemble les parties du joueur. Retourne (son dossier de données ou None, nombre de parties)."""
     from rlpi import config, game
 
-    user = safe(user)
-    with lock(user):
-        gdir, changed = download(user)
-        data = cache_root() / user / "data"
-        if not any((g / "result.json").exists() for g in gdir.iterdir()):
-            return None
-        if changed or force or not (data / "features" / f"player_match_stats_{USER_SOURCE}.parquet").exists():
-            # On repart d'un dossier propre : les tables du joueur sont entièrement reconstruites
-            shutil.rmtree(data, ignore_errors=True)
-            data.mkdir(parents=True)
-            game.merge(gdir, data, USER_SOURCE)
-            link_reference(data, config.DATA, {USER_SOURCE, config.SOURCE, "theo", "perso", "users"})
-            _run(user, data, ["synergy"])
-        return data
+    matches = player_matches(player_id)
+    if not matches:
+        return None, 0
+    root = cache_root() / "players" / store.safe(player_id)
+    data = root / "data"
+    manifest_f = root / "manifest.json"
+    with lock("player:" + player_id):
+        old = json.loads(manifest_f.read_text(encoding="utf-8")) if manifest_f.exists() else None
+        ok = (data / "features" / f"player_match_stats_{USER_SOURCE}.parquet").exists()
+        if old == matches and ok and not force:
+            return data, len(matches)
+        cli, b = store.s3(), store.bucket()
+        dirs = [fetch_game(cli, b, mid, ver) for mid, ver in sorted(matches.items())]
+        # On repart d'un dossier propre : les tables du joueur sont entièrement reconstruites
+        shutil.rmtree(data, ignore_errors=True)
+        data.mkdir(parents=True)
+        game.merge(dirs, data, USER_SOURCE)
+        link_reference(data, config.DATA, {USER_SOURCE, config.SOURCE, "theo", "perso", "users"})
+        _run(player_id, data, ["synergy"])
+        manifest_f.write_text(json.dumps(matches), encoding="utf-8")
+    return data, len(matches)
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -181,53 +159,38 @@ def _env(data: Path) -> dict:
     return e
 
 
-def _run(user: str, data: Path, args: list[str]) -> str:
-    p = subprocess.run([sys.executable, "-m", "rlpi.players", "_inner", "--user", user, *args], env=_env(data),
-                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+def _run(player_id: str, data: Path, args: list[str]) -> str:
+    p = subprocess.run([sys.executable, "-m", "rlpi.players", "_inner", "--player", player_id, *args],
+                       env=_env(data), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=600)
     if p.returncode != 0:
-        raise RuntimeError(f"rlpi.players {args[0]} ({user}) : {(p.stderr or p.stdout)[-1500:]}")
+        raise RuntimeError(f"rlpi.players {args[0]} ({player_id}) : {(p.stderr or p.stdout)[-1500:]}")
     return p.stdout
 
 
-def payload(user: str, data: Path, j: str | None, since: str | None, until: str | None,
+def payload(player_id: str, data: Path, j: str | None, since: str | None, until: str | None,
             avec: list[str], sans: list[str]) -> dict:
     """Contenu du tableau de bord du joueur (même structure que dans rlpi.serve) ; `data` vient de build()."""
     args = ["payload"] + (["--j", j] if j else []) + (["--since", since] if since else []) \
         + (["--until", until] if until else []) + (["--avec", ",".join(avec)] if avec else []) \
         + (["--sans", ",".join(sans)] if sans else [])
-    out = _run(safe(user), data, args)
+    out = _run(player_id, data, args)
     return json.loads(out.strip().splitlines()[-1])
 
 
-def _profile_ids(user: str) -> tuple[list[str], dict[str, str], list[dict]]:
-    """Exécuté dans le processus fils : joueur suivi (profil ou le plus présent) et ses coéquipiers fréquents."""
+def _profile_ids(me: str) -> tuple[list[str], dict[str, str], list[dict]]:
+    """Exécuté dans le processus fils : le joueur et ses coéquipiers les plus fréquents (2 au plus)."""
     import polars as pl
 
-    from rlpi.config import FEATURES, FRAMES
+    from rlpi.config import FEATURES
 
-    prof_f = cache_root() / user / "profile.json"
-    prof = json.loads(prof_f.read_text(encoding="utf-8")) if prof_f.exists() else {}
     st = pl.read_parquet(FEATURES / f"player_match_stats_{USER_SOURCE}.parquet",
                          columns=["player_id", "player_name", "date", "replay_file", "team"])
-
-    def resolve(q: str) -> str | None:
-        d = st.filter((pl.col("player_id") == q) | (pl.col("player_name").str.to_lowercase() == q.lower()))
-        return None if d.is_empty() else d["player_id"].mode()[0]
-
-    me = resolve(prof["player"]) if prof.get("player") else None
-    if me is None:  # le joueur présent dans le plus de parties
-        cnt = Counter(p["id"] for f in (FRAMES / USER_SOURCE).glob("*.meta.json")
-                      for p in json.loads(f.read_text(encoding="utf-8"))["players"])
-        me = next((pid for pid, _ in cnt.most_common() if not st.filter(pl.col("player_id") == pid).is_empty()),
-                  st["player_id"].mode()[0])
-    if prof.get("compare"):
-        peers = [p for p in (resolve(q) for q in prof["compare"]) if p and p != me]
-    else:  # coéquipiers présents dans au moins 5 parties avec lui (2 au plus)
-        mine = st.filter(pl.col("player_id") == me).select("replay_file", "team")
-        mates = st.join(mine, on=["replay_file", "team"]).filter(pl.col("player_id") != me)
-        top = mates.group_by("player_id").agg(pl.len().alias("n")).filter(pl.col("n") >= 5).sort("n", descending=True)
-        peers = top["player_id"].head(2).to_list()
-    ids = [me, *peers]
+    mine = st.filter(pl.col("player_id") == me).select("replay_file", "team")
+    mates = st.join(mine, on=["replay_file", "team"]).filter(pl.col("player_id") != me)
+    top = (mates.group_by("player_id").agg(pl.len().alias("n")).filter(pl.col("n") >= MIN_GAMES_TOGETHER)
+           .sort("n", descending=True))
+    ids = [me, *top["player_id"].head(2).to_list()]
     names = {pid: st.filter(pl.col("player_id") == pid).sort("date")["player_name"][-1] for pid in ids}
     days = (st.filter(pl.col("player_id") == me).unique("replay_file")
             .with_columns(pl.col("date").str.slice(0, 10).alias("d")).group_by("d").agg(pl.len().alias("n"))
@@ -247,7 +210,7 @@ def _inner(a: argparse.Namespace) -> None:
         return
     from rlpi.dashboard import make_payload
 
-    ids, names, days = _profile_ids(a.user)
+    ids, names, days = _profile_ids(a.player)
     sel = a.j if a.j in ids else ids[0]
     avec = [x for x in (a.avec or "").split(",") if x in ids and x != sel]
     sans = [x for x in (a.sans or "").split(",") if x in ids and x != sel and x not in avec]
@@ -266,26 +229,19 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Espace joueur")
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("sync")
-    s.add_argument("--user", required=True)
+    s.add_argument("--player", required=True)
     s.add_argument("--force", action="store_true")
-    s = sub.add_parser("payload")
-    s.add_argument("--user", required=True)
     s = sub.add_parser("_inner")
-    s.add_argument("--user", required=True)
+    s.add_argument("--player", required=True)
     s.add_argument("cmd2", choices=["synergy", "payload"])
     for k in ("--j", "--since", "--until", "--avec", "--sans"):
         s.add_argument(k)
     a = ap.parse_args()
     if a.cmd == "_inner":
         _inner(a)
-    elif a.cmd == "sync":
-        print(build(a.user, a.force))
     else:
-        data = build(a.user)
-        if data is None:
-            raise SystemExit(f"aucune partie traitée pour {a.user}")
-        p = payload(a.user, data, None, None, None, [], [])
-        print(json.dumps({k: v for k, v in p.items() if k != "profiles"}, ensure_ascii=False))
+        data, n = build(a.player, a.force)
+        print(f"{n} partie(s) → {data}")
 
 
 if __name__ == "__main__":
