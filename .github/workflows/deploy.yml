@@ -50,7 +50,13 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Déploiement sur Coolify
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
         run: |
+          # Retire espaces et retours à la ligne collés par erreur avec les secrets
+          TOKEN="$(printf '%s' "$COOLIFY_TOKEN" | tr -d '[:space:]')"
+          UUID="$(printf '%s' "$COOLIFY_APP_UUID" | tr -d '[:space:]')"
           curl -fsS -X POST \
-            -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
-            "https://coolify.lainox.quest/api/v1/deploy?uuid=${{ secrets.COOLIFY_APP_UUID }}"
+            -H "Authorization: Bearer $TOKEN" \
+            "https://coolify.lainox.quest/api/v1/deploy?uuid=$UUID"
