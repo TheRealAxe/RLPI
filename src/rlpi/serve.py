@@ -108,7 +108,9 @@ class Handler(SimpleHTTPRequestHandler):
         from rlpi import account
 
         if not account.configured():
-            return self.send_html(account.page("RLPI", "<p>Espace joueur non configuré sur ce serveur.</p>"), 404)
+            return self.send_html(account.page("RLPI", "<p>Espace joueur non configuré sur ce serveur.</p>"
+                                                       "<p class='note'>Variables manquantes dans Coolify : "
+                                                       f"{', '.join(account.missing())}.</p>"), 404)
         if path == "/connexion":
             return self.redirect(account.steam_login_url())
         if path == "/connexion/retour":

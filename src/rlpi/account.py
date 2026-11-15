@@ -34,9 +34,17 @@ SESSION_DAYS = 30
 REFRESH_EVERY = 300  # secondes entre deux recherches manuelles
 
 
+REQUIRED = ("RLPI_PUBLIC_URL", "RLPI_SECRET", "DATABASE_URL", "REDIS_URL", "S3_ENDPOINT", "S3_ACCESS_KEY",
+            "S3_SECRET_KEY")
+
+
+def missing() -> list[str]:
+    """Variables obligatoires absentes (noms seulement, jamais les valeurs)."""
+    return [k for k in REQUIRED if not os.getenv(k, "").strip().strip("\"'")]
+
+
 def configured() -> bool:
-    return all(os.getenv(k, "").strip() for k in ("RLPI_PUBLIC_URL", "RLPI_SECRET", "DATABASE_URL", "REDIS_URL",
-                                                  "S3_ENDPOINT"))
+    return not missing()
 
 
 def base_url() -> str:
