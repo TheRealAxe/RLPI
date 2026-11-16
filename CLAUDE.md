@@ -42,15 +42,20 @@ Le plan détaillé, phase par phase, est dans `docs/PLAN.md`. Lis-le avant toute
   librairie cliente, ou des pauses explicites). Pas de téléchargement massif en parallèle.
 - Ne télécharge que des replays publics, et n'uploade rien au nom de Théo sans qu'il l'ait demandé.
 
-## Stack technique (à confirmer en phase 0)
+## Stack technique
 
-- Python 3.11+, environnement virtuel dédié.
-- Polars ou pandas + PyArrow pour les tables, Parquet pour le stockage.
-- Collecte : client Python de l'API ballchasing (ex. `python-ballchasing`).
-- Parsing : un parseur donnant les positions image par image (ex. `analyzerl-parser`,
-  `sprocket-rl-parser`/carball). Comparer et choisir en phase 2.
-- Modèles : scikit-learn / LightGBM pour commencer ; réseau de neurones seulement si nécessaire.
-- Restitution : petite application web locale (Streamlit ou équivalent).
+- **Données et modèles** : Python 3.11+ (dépendances verrouillées par `uv`, `uv.lock`), Polars + PyArrow,
+  Parquet ; collecte par l'API ballchasing (`python-ballchasing`), parsing par `subtr-actor-py` ; LightGBM et
+  scikit-learn.
+- **Application web** (refonte terminée, voir `docs/PLAN_REFONTE_WEB.md` et `docs/JOURNAL_REFONTE_WEB.md`) :
+  le worker calcule, l'API sert, le navigateur affiche.
+  - Worker (`rlpi.worker`) : file Redis → analyse de la partie → Garage (S3) → agrégats par partie dans Postgres.
+  - API FastAPI (`rlpi.web`, uvicorn) : connexion Steam, sessions en base, contenu du tableau de bord en JSON.
+  - Interface Vue 3 + Vite + TypeScript (`web/`), servie par FastAPI ; types générés depuis l'OpenAPI.
+  - Postgres (schéma par migrations Flyway, `migrations/`), Redis, Garage ; déploiement Coolify
+    (`docs/DEPLOIEMENT_COOLIFY.md`).
+- Qualité : ruff, pyright, pytest ; vue-tsc et vitest ; la CI (`.github/workflows/tests.yml`) passe avant tout
+  déploiement.
 
 ## Questions ouvertes à poser à Théo dès la première session
 

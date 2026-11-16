@@ -6,22 +6,82 @@ build-backend = "setuptools.build_meta"
 name = "rlpi"
 version = "0.1.0"
 description = "RLPI v2 — Rocket League Player Index"
-requires-python = ">=3.11"
+requires-python = ">=3.13,<3.14"
+# Seule source des dépendances (verrouillées dans uv.lock). Les images Docker les installent avec
+#   uv sync --frozen --no-dev --extra server   (Dockerfile)
+#   uv sync --frozen --no-dev --extra worker   (Dockerfile.worker)
+# En local : uv sync --all-extras   (les outils de développement du groupe « dev » sont installés par défaut)
 dependencies = [
     "python-dotenv>=1.2",
-    "requests>=2.32",
-    "python-ballchasing>=0.5.4",
-    "polars>=2.0",
+    "polars>=2.1",
     "numpy>=2",
     "pyarrow>=20",
-    "pyyaml>=6",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.3",
+    "redis>=5",
+    "boto3>=1.35",
 ]
 
 [project.optional-dependencies]
-# Installés aux phases suivantes
-parse = []          # choix du parseur en phase 2
-model = ["scikit-learn>=1.9", "lightgbm>=4.7"]
-app = ["streamlit>=1.60"]
+# Serveur du site (rlpi.web : FastAPI, uvicorn)
+server = [
+    "fastapi>=0.163.2",
+    "pydantic-settings>=2.16.3",
+    "uvicorn[standard]>=0.54.0",
+]
+# Worker (rlpi.worker) et commandes de collecte, d'analyse et d'entraînement des modèles
+worker = [
+    "lightgbm==4.7.0",
+    "scikit-learn>=1.9",
+    "subtr-actor-py==1.5.1",
+    "python-ballchasing>=0.5.4",
+    "requests>=2.32",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9",
+    "ruff>=0.17",
+    "pyright>=1.1.400",
+    "fakeredis>=2.30",
+    "httpx>=0.28.1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.uv]
+# Seules les plateformes utiles : le poste de développement (Windows) et les images / la CI (Linux x86-64)
+environments = ["sys_platform == 'win32'", "sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+src = ["src", "."]
+
+[tool.ruff.lint]
+# Erreurs réelles (pyflakes, syntaxe), imports triés, pièges courants (bugbear), écritures modernes
+select = ["E4", "E7", "E9", "F", "W", "I", "B", "UP"]
+# Style dense voulu dans les modules d'analyse : plusieurs instructions par ligne (E702), fonctions définies dans
+# des boucles et appelées aussitôt (B023), zip sans strict (B905, le rendre strict changerait le comportement)
+ignore = ["B023", "B905", "E702", "E741"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rlpi", "tests"]
+
+[tool.ruff.format]
+# Mise en forme vérifiée en CI seulement sur les fichiers listés dans .github/workflows/tests.yml (code neuf ou
+# repris pendant la refonte) : les modules d'analyse existants ne sont pas reformatés d'un coup.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.pyright]
+include = ["src/rlpi/store.py", "src/rlpi/account.py", "src/rlpi/worker.py", "src/rlpi/migrate.py", "src/rlpi/context.py",
+           "src/rlpi/dashboard", "src/rlpi/web", "src/rlpi/events.py", "src/rlpi/swipe_online.py",
+           "src/rlpi/logs.py", "src/rlpi/backup.py"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"

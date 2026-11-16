@@ -1,0 +1,56 @@
+{
+ "replay": "partie-06",
+ "file": "partie-06.replay",
+ "status": "ok",
+ "date": "2024-04-14 19-21-47",
+ "match_type": "Online",
+ "n_frames": 3579,
+ "n_touches": 181,
+ "players": [
+  {
+   "slot": 0,
+   "id": "Steam:76561190000000019",
+   "name": "Joueur 019",
+   "team": 0
+  },
+  {
+   "slot": 1,
+   "id": "Steam:76561190000000001",
+   "name": "Joueur 001",
+   "team": 0
+  },
+  {
+   "slot": 2,
+   "id": "Steam:76561190000000020",
+   "name": "Joueur 020",
+   "team": 0
+  },
+  {
+   "slot": 3,
+   "id": "Epic:00000000000000000000000000000015",
+   "name": "Joueur 021",
+   "team": 1
+  },
+  {
+   "slot": 4,
+   "id": "Steam:76561190000000022",
+   "name": "Joueur 022",
+   "team": 1
+  },
+  {
+   "slot": 5,
+   "id": "Steam:76561190000000023",
+   "name": "Joueur 023",
+   "team": 1
+  }
+ ],
+ "score": [
+  2,
+  1
+ ],
+ "match_guid": null,
+ "online_3v3": true,
+ "steps": {},
+ "errors": {},
+ "rempli_par": "scripts/make_fixtures.py"
+}

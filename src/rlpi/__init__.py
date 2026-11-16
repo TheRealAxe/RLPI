@@ -1,4 +1,3 @@
-
 # Console Windows : forcer l'UTF-8 pour que les messages (→, accents) ne fassent pas planter les scripts.
 import sys as _sys
 

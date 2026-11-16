@@ -49,7 +49,6 @@ def episodes(m: dict, f: pl.DataFrame, booster) -> list[dict]:
         dist = {k: np.hypot(P(k, "x") - bx, P(k, "y") - by) + np.where(f[f"p{k}_demo"].to_numpy() > 0, 1e5, 0)
                 for k in own + opp}
         do = np.stack([dist[k] for k in opp]); dm = np.stack([dist[k] for k in own])
-        att = np.array(opp)[np.argmin(do, 0)]
         att_y = np.choose(np.argmin(do, 0), [P(k, "y") for k in opp])
         n_opp = (do < NEAR).sum(0); n_own = (dm < NEAR).sum(0)
         dfd_i = np.argmin(dm, 0); dfd = np.array(own)[dfd_i]

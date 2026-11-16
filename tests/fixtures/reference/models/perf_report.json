@@ -1,0 +1,92 @@
+{
+ "version": 2,
+ "impact": "xV (but crédité de la valeur du modèle avant la ligne)",
+ "n_ref_player_matches": 1758,
+ "n_ref_matches": 293,
+ "weights": {
+  "impact": 0.48929624272823913,
+  "placement": 0.02241785053211795,
+  "duels": 0.049250667517628535,
+  "boost": 0.19093974358945862,
+  "vitesse": 0.11608265292641863,
+  "fiabilite": 0.0,
+  "collectif": 0.13201284270613703
+ },
+ "raw_coef": {
+  "impact": 0.6109922399252505,
+  "placement": 0.027993537482640683,
+  "duels": 0.06150011595556633,
+  "boost": 0.2384295881284176,
+  "vitesse": 0.14495431179382848,
+  "fiabilite": -0.00030952727148474157,
+  "collectif": 0.16484660093480688
+ },
+ "weights_fond": {
+  "placement": 0.08933552462587357,
+  "duels": 0.15911898241335432,
+  "boost": 0.2766227283768416,
+  "vitesse": 0.23166788207868974,
+  "fiabilite": 0.0011443489318658045,
+  "collectif": 0.24211053357337486
+ },
+ "auc_player_oof": 0.6753524599393508,
+ "team_acc_oof": 0.8225255972696246,
+ "rlcs_team_acc": 0.7907907907907908,
+ "rlcs_team_acc_prod": 0.7987987987987988,
+ "rlcs_team_acc_fond": 0.5811623246492986,
+ "rlcs_n_matches": 999,
+ "perso_team_acc": 0.8181818181818182,
+ "perso_n_matches": 44,
+ "retest": {
+  "index": {
+   "players": 207,
+   "matches_per_player": 27.004830917874397,
+   "reliability_mean": 0.6865513542149139,
+   "reliability_1": 0.07502326766674083,
+   "matches_for_08": 50
+  },
+  "prod": {
+   "players": 207,
+   "matches_per_player": 27.004830917874397,
+   "reliability_mean": 0.34184272194104104,
+   "reliability_1": 0.018870419587693626,
+   "matches_for_08": 208
+  },
+  "fond": {
+   "players": 207,
+   "matches_per_player": 27.004830917874397,
+   "reliability_mean": 0.8594869854401386,
+   "reliability_1": 0.18467636693269127,
+   "matches_for_08": 18
+  }
+ },
+ "median": {
+  "impact": 0.7278602356493169,
+  "placement": -1831.5487713803366,
+  "duels": 50.0,
+  "boost": -13.160987246862677,
+  "vitesse": 56.58629740585478,
+  "fiabilite": -1.9699670454718605,
+  "collectif": 4.947475038936519
+ },
+ "sd": {
+  "impact": 0.7741214697559364,
+  "placement": 219.35400417845574,
+  "duels": 20.271411691044502,
+  "boost": 4.922323358223464,
+  "vitesse": 3.361570602383529,
+  "fiabilite": 1.427640857224963,
+  "collectif": 2.3092882065078846
+ },
+ "split_half": {
+  "source": "ssl",
+  "n": 1728,
+  "impact": 0.16017786872824574,
+  "placement": 0.37809655296018496,
+  "boost": 0.5640985565072987,
+  "vitesse": 0.6563174144968963,
+  "index": 0.2575165605617859,
+  "fond": 0.4896820904731152,
+  "prod": 0.16017786872824574
+ }
+}

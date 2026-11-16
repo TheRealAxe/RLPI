@@ -79,7 +79,7 @@ def sync_player(player_id: str, log=print, conn=None, r=None, cli=None, api=None
     """
     from rlpi.config import ballchasing_api
 
-    conn = conn or store.db()
+    conn = conn or store.connect()
     r = r or store.redis_client()
     api = api or ballchasing_api()
     row = conn.execute("SELECT synced_until FROM accounts WHERE player_id = %s", (player_id,)).fetchone()
@@ -100,7 +100,7 @@ def sync_player(player_id: str, log=print, conn=None, r=None, cli=None, api=None
                 newest = created
             ins = conn.execute(
                 "INSERT INTO matches (id, source, status, played_at) VALUES (%s, 'ballchasing', 'en_attente', %s) "
-                "ON CONFLICT (id) DO NOTHING RETURNING id", (rep["id"], rep.get("date")))
+                "ON CONFLICT (id) DO NOTHING RETURNING id", (rep["id"], store.played_at(rep.get("date"))))
             if ins.fetchone():
                 store.push_match(r, rep["id"])
                 added += 1
@@ -113,7 +113,7 @@ def sync_player(player_id: str, log=print, conn=None, r=None, cli=None, api=None
 
 def sync_all(log=print, conn=None, r=None) -> int:
     """Passe sur tous les comptes. Un seul worker à la fois (verrou Redis)."""
-    conn = conn or store.db()
+    conn = conn or store.connect()
     r = r or store.redis_client()
     if not r.set(SYNC_LOCK, str(time.time()), nx=True, ex=3600):
         return 0

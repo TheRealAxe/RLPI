@@ -1,0 +1,86 @@
+{
+ "horizon_s": 5,
+ "n_matches": 996,
+ "n_test_matches": 199,
+ "n_rows": 3369206,
+ "goal_rate": 0.029395056283290484,
+ "best_iteration": 604,
+ "auc": 0.8843132531138306,
+ "logloss": 0.09196940754579509,
+ "logloss_base": 0.13041300237957418,
+ "brier": 0.02255235566227929,
+ "brier_base": 0.027932644331313816,
+ "calibration": [
+  {
+   "tranche": "0%–1%",
+   "n": 375814,
+   "predit": 0.0033031515411548937,
+   "observe": 0.0029988238862841726
+  },
+  {
+   "tranche": "1%–2%",
+   "n": 104227,
+   "predit": 0.014358186938130376,
+   "observe": 0.015120842008308788
+  },
+  {
+   "tranche": "2%–5%",
+   "n": 110520,
+   "predit": 0.03175096453566442,
+   "observe": 0.03408432862830257
+  },
+  {
+   "tranche": "5%–10%",
+   "n": 48701,
+   "predit": 0.06961400260513398,
+   "observe": 0.07006016303566662
+  },
+  {
+   "tranche": "10%–20%",
+   "n": 24021,
+   "predit": 0.13757489621713176,
+   "observe": 0.1352150201906665
+  },
+  {
+   "tranche": "20%–30%",
+   "n": 6987,
+   "predit": 0.2426574621365006,
+   "observe": 0.22541863460712752
+  },
+  {
+   "tranche": "30%–50%",
+   "n": 5144,
+   "predit": 0.3794594919241706,
+   "observe": 0.36216951788491447
+  },
+  {
+   "tranche": "50%–70%",
+   "n": 1960,
+   "predit": 0.5873815394022502,
+   "observe": 0.5653061224489796
+  },
+  {
+   "tranche": "70%–100%",
+   "n": 2098,
+   "predit": 0.8568695363492063,
+   "observe": 0.8889418493803622
+  }
+ ],
+ "top_features": [
+  "ball_on_target_opp",
+  "ball_t_opp_goal",
+  "ball_dist_opp_goal",
+  "oppteam_n_goalside",
+  "own0_y",
+  "ball_x_at_opp_line",
+  "ball_z",
+  "own0_vy",
+  "own0_dist_ball",
+  "ball_t_own_goal",
+  "oppteam_mean_boost",
+  "seconds_remaining",
+  "own1_y",
+  "own1_vy",
+  "ball_vy"
+ ]
+}

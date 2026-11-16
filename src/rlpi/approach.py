@@ -121,7 +121,7 @@ def train() -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["train"])
-    a = ap.parse_args()
+    ap.parse_args()
     train()
 
 

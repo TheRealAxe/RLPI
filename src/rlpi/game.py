@@ -8,14 +8,14 @@ Chaque partie est traitée seule, dans un dossier autonome, avec les modèles d�
     <dossier_partie>/features/<table>_partie.parquet   (+ value_curves_partie.json, bestplay_X_partie.npy)
     <dossier_partie>/result.json                       statut, durée de chaque étape, erreurs
 
-Les étapes sont celles de l'application (rlpi.app), dans le même ordre : frames, stats, valeur des touches,
+Les étapes, dans l'ordre : frames, stats, valeur des touches,
 buts (xV), décisions à la touche, placement, passes, indice de performance, défense, engagements, meilleur jeu.
 Toutes ne dépendent que de la partie elle-même ; l'indice de performance utilise la référence SSL figée
 (data/models/perf_reference.npz, voir rlpi.perf).
 
 Puis on rassemble les parties d'un joueur dans un dossier de données classique, lisible par le tableau de bord :
 
-    python -m rlpi.game merge <dossier_des_parties> --into <dossier_data> [--source theo]
+    python -m rlpi.game merge <dossier_des_parties> --into <dossier_data> [--source perso]
 
 Ce qui reste au niveau du joueur (toutes ses parties ensemble) n'est pas fait ici : synergie (rlpi.synergy),
 actions à revoir (bestplay worst), tableau de bord.
@@ -234,7 +234,7 @@ def main() -> None:
     s = sub.add_parser("merge", help="rassembler les parties d'un joueur")
     s.add_argument("games_dir")
     s.add_argument("--into", required=True)
-    s.add_argument("--source", default=None, help="nom de la source (défaut : RLPI_SOURCE, sinon theo)")
+    s.add_argument("--source", default=None, help="nom de la source (défaut : RLPI_SOURCE, sinon perso)")
     s = sub.add_parser("_steps")
     s.add_argument("replay")
     a = ap.parse_args()

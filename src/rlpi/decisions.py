@@ -297,10 +297,10 @@ def placement_score_perso() -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["touches", "touches-perso", "touches-theo", "placement", "placement-perso", "placement-score"])
+    ap.add_argument("cmd", choices=["touches", "touches-perso", "placement", "placement-perso", "placement-score"])
     ap.add_argument("--source", default=SOURCE)
     a = ap.parse_args()
-    if a.cmd in ("touches-perso", "touches-theo"):  # même commande : touches de la source suivie (SOURCE)
+    if a.cmd == "touches-perso":  # touches de la source suivie (SOURCE)
         touches(retrain=False)
     elif a.cmd == "placement-score":
         placement_score(a.source)
