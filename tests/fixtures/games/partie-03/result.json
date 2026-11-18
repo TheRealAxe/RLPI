@@ -1,0 +1,56 @@
+{
+ "replay": "partie-03",
+ "file": "partie-03.replay",
+ "status": "ok",
+ "date": "2023-12-10 22-24-20",
+ "match_type": "Online",
+ "n_frames": 1484,
+ "n_touches": 70,
+ "players": [
+  {
+   "slot": 0,
+   "id": "Steam:76561190000000001",
+   "name": "Joueur 001",
+   "team": 0
+  },
+  {
+   "slot": 1,
+   "id": "Steam:76561190000000002",
+   "name": "Joueur 002",
+   "team": 0
+  },
+  {
+   "slot": 2,
+   "id": "Steam:76561190000000003",
+   "name": "Joueur 003",
+   "team": 0
+  },
+  {
+   "slot": 3,
+   "id": "Steam:76561190000000010",
+   "name": "Joueur 010",
+   "team": 1
+  },
+  {
+   "slot": 4,
+   "id": "Steam:76561190000000011",
+   "name": "Joueur 011",
+   "team": 1
+  },
+  {
+   "slot": 5,
+   "id": "Xbox:76561190000000012",
+   "name": "Joueur 012",
+   "team": 1
+  }
+ ],
+ "score": [
+  3,
+  0
+ ],
+ "match_guid": null,
+ "online_3v3": true,
+ "steps": {},
+ "errors": {},
+ "rempli_par": "scripts/make_fixtures.py"
+}

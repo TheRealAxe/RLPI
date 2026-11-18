@@ -41,6 +41,7 @@ import numpy as np
 import polars as pl
 
 from rlpi.config import FEATURES, FRAMES, MODELS, SOURCE
+from rlpi.context import DataContext, resolve
 
 COMPONENTS = [
     # (clé, libellé, sens)
@@ -61,10 +62,19 @@ def _meta(source: str) -> dict[str, dict]:
             for p in (FRAMES / source).glob("*.meta.json")}
 
 
-def touch_xv(source: str) -> pl.DataFrame:
+def touch_xv(source: str, ctx: DataContext | None = None) -> pl.DataFrame:
     """Touches valorisées, avec dv_xv : les touches de but créditées de la valeur du modèle avant la ligne."""
-    tv = pl.read_parquet(FEATURES / f"touch_values_{source}.parquet").sort("replay", "i")
-    gx = pl.read_parquet(FEATURES / f"goal_xv_{source}.parquet").sort("replay", "goal_i")
+    ctx = resolve(ctx)
+    return xv(pl.read_parquet(ctx.feature("touch_values", source)), pl.read_parquet(ctx.feature("goal_xv", source)))
+
+
+GOAL_XV_SCHEMA = {"replay": pl.String, "goal_i": pl.Int64, "scorer_team": pl.Int64, "v_team0": pl.Float64}
+
+
+def xv(tv: pl.DataFrame, gx: pl.DataFrame | None) -> pl.DataFrame:
+    """touch_xv à partir des tables (toute une source, ou une seule partie ; gx None : partie sans but)."""
+    tv = tv.sort("replay", "i")
+    gx = (gx if gx is not None else pl.DataFrame(schema=GOAL_XV_SCHEMA)).sort("replay", "goal_i")
     tv = tv.join_asof(gx, left_on="i", right_on="goal_i", by="replay", strategy="forward", check_sortedness=False)
     v_goal = pl.when(pl.col("team") == 0).then(pl.col("v_team0")).otherwise(-pl.col("v_team0"))
     return tv.with_columns(pl.when(pl.col("v_after").abs() >= 0.999).then(v_goal - pl.col("v_before"))
@@ -73,7 +83,7 @@ def touch_xv(source: str) -> pl.DataFrame:
 
 def player_matches(source: str) -> pl.DataFrame:
     """Une ligne par joueur et par match, avec les composantes brutes (orientées plus haut = mieux)."""
-    from rlpi.dashboard import metrics
+    from rlpi.dashboard.metrics import metrics
 
     st = metrics(pl.read_parquet(FEATURES / f"player_match_stats_{source}.parquet")).filter(~pl.col("is_bot"))
     st = st.with_columns(pl.col("replay_file").map_elements(lambda f: Path(f).stem, return_dtype=pl.Utf8).alias("replay"))

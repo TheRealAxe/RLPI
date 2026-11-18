@@ -21,8 +21,7 @@ import argparse
 import json
 import re
 import sys
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
@@ -199,7 +198,8 @@ def index_ssl(count: int) -> None:
 
 # --------------------------------------------------------------------------- download
 def replay_path(row: dict) -> Path:
-    safe = lambda s: re.sub(r'[<>:"/\\|?*]+', "_", s).strip()[:80]
+    def safe(s):
+        return re.sub(r'[<>:"/\\|?*]+', "_", s).strip()[:80]
     parts = [safe(p) for p in row["group_path"].split(" / ")]
     return config.RAW.joinpath(row["source"], *parts, f"{row['replay_id']}.replay")
 
@@ -220,7 +220,7 @@ def download(source: str, limit: int | None, season: str | None) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_suffix(".part")
         entry = {"replay_id": row["replay_id"], "source": source,
-                 "time": datetime.now(timezone.utc).isoformat()}
+                 "time": datetime.now(UTC).isoformat()}
         try:
             api.download_replay(row["replay_id"], tmp)
             if tmp.stat().st_size < 10_000:

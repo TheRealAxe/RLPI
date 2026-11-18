@@ -1,29 +1,31 @@
-"""Comptes joueurs : connexion avec Steam (OpenID 2.0), session, page personnelle /moi.
+"""Comptes joueurs : connexion avec Steam (OpenID 2.0), comptes, recherche des parties.
 
 Un joueur se connecte avec son compte Steam : Steam nous renvoie son SteamID, qui est exactement l'identifiant
 présent dans les replays (« Steam:7656… »). Aucun mot de passe n'est géré ici.
 À la première connexion, le compte est créé (table accounts) et une recherche de ses parties sur ballchasing est
 mise en file (les workers s'en chargent, voir rlpi.collector).
 
-Pages (servies par rlpi.serve) :
-    /connexion             redirige vers Steam
-    /connexion/retour      retour de Steam : vérification, création du compte, cookie de session
-    /deconnexion
-    /moi                   tableau de bord du joueur connecté (ou état de l'import en cours)
-    POST /moi/actualiser   chercher maintenant ses nouvelles parties (au plus une fois toutes les 5 minutes)
+Routes (rlpi.web) : /auth/steam, /auth/steam/retour, POST /auth/deconnexion, POST /api/moi/actualiser ; les pages
+sont dans l'interface Vue (web/).
+Les sessions sont en base (rlpi.web.sessions) ; les fonctions de cookie signé ci-dessous (make_cookie,
+session_player) ne servent plus qu'à accepter une dernière fois les cookies ouverts avant la phase E.
 
-Variables : RLPI_PUBLIC_URL (ex. https://rlpi.lainox.quest), RLPI_SECRET (longue chaîne aléatoire, signe les
-cookies de session), plus DATABASE_URL, REDIS_URL et S3_* (voir rlpi.store).
+Développement seulement : RLPI_DEV_LOGIN=1 active /dev/connexion, qui ouvre une session pour n'importe quel joueur
+sans passer par Steam ; la page de connexion liste les joueurs connus (/dev/joueurs). Le serveur refuse de démarrer
+avec cette variable si RLPI_PUBLIC_URL est en https://.
+
+Variables : RLPI_PUBLIC_URL (ex. https://rlpi.lainox.quest), RLPI_SECRET (longue chaîne aléatoire, signait les
+anciens cookies), plus DATABASE_URL, REDIS_URL et S3_* (voir rlpi.store).
 """
 from __future__ import annotations
 
 import hashlib
 import hmac
-import html
 import os
 import re
 import time
 import urllib.request
+from typing import Any
 from urllib.parse import urlencode
 
 from rlpi import store
@@ -34,19 +36,6 @@ SESSION_DAYS = 30
 REFRESH_EVERY = 300  # secondes entre deux recherches manuelles
 
 
-REQUIRED = ("RLPI_PUBLIC_URL", "RLPI_SECRET", "DATABASE_URL", "REDIS_URL", "S3_ENDPOINT", "S3_ACCESS_KEY",
-            "S3_SECRET_KEY")
-
-
-def missing() -> list[str]:
-    """Variables obligatoires absentes (noms seulement, jamais les valeurs)."""
-    return [k for k in REQUIRED if not os.getenv(k, "").strip().strip("\"'")]
-
-
-def configured() -> bool:
-    return not missing()
-
-
 def base_url() -> str:
     return store.env("RLPI_PUBLIC_URL").rstrip("/")
 
@@ -55,12 +44,15 @@ def base_url() -> str:
 # Steam OpenID
 
 
+RETURN_PATHS = ("/auth/steam/retour", "/connexion/retour")  # le second : connexions commencées avant la phase E
+
+
 def steam_login_url() -> str:
     b = base_url()
     return STEAM_OPENID + "?" + urlencode({
         "openid.ns": "http://specs.openid.net/auth/2.0",
         "openid.mode": "checkid_setup",
-        "openid.return_to": f"{b}/connexion/retour",
+        "openid.return_to": f"{b}{RETURN_PATHS[0]}",
         "openid.realm": b,
         "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
         "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
@@ -72,7 +64,7 @@ def steam_verify(query: dict[str, list[str]]) -> str | None:
     q = {k: v[0] for k, v in query.items() if k.startswith("openid.")}
     if q.get("openid.mode") != "id_res" or q.get("openid.op_endpoint") != STEAM_OPENID:
         return None
-    if not q.get("openid.return_to", "").startswith(f"{base_url()}/connexion/retour"):
+    if not q.get("openid.return_to", "").startswith(tuple(f"{base_url()}{p}" for p in RETURN_PATHS)):
         return None
     m = re.fullmatch(r"https://steamcommunity\.com/openid/id/(\d{17})", q.get("openid.claimed_id", ""))
     if not m:
@@ -86,7 +78,7 @@ def steam_verify(query: dict[str, list[str]]) -> str | None:
 
 
 # --------------------------------------------------------------------------------------------------------------
-# Session (cookie signé)
+# Anciens cookies signés (avant la phase E) : acceptés une dernière fois, puis remplacés par une session
 
 
 def _sign(payload: str) -> str:
@@ -99,10 +91,6 @@ def make_cookie(player_id: str) -> str:
     secure = "; Secure" if base_url().startswith("https://") else ""
     return (f"{COOKIE}={payload}|{_sign(payload)}; Path=/; Max-Age={SESSION_DAYS * 86400}; HttpOnly; "
             f"SameSite=Lax{secure}")
-
-
-def clear_cookie() -> str:
-    return f"{COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
 
 
 def session_player(cookie_header: str | None) -> str | None:
@@ -125,12 +113,36 @@ def login(steam_id: str) -> str:
     """Crée le compte au besoin et lance la recherche de ses parties. Retourne l'identifiant « Steam:… »."""
     pid = f"Steam:{steam_id}"
     with store.db() as c:
-        new = c.execute("INSERT INTO accounts (player_id, last_login) VALUES (%s, now()) "
-                        "ON CONFLICT (player_id) DO UPDATE SET last_login = now() "
-                        "RETURNING (xmax = 0)", (pid,)).fetchone()[0]
+        new = store.scalar(c, "INSERT INTO accounts (player_id, last_login) VALUES (%s, now()) "
+                              "ON CONFLICT (player_id) DO UPDATE SET last_login = now() "
+                              "RETURNING (xmax = 0)", (pid,))
     if new:
         store.push_sync(store.redis_client(), pid)
     return pid
+
+
+def dev_login_enabled() -> bool:
+    return os.getenv("RLPI_DEV_LOGIN", "").strip().strip("\"'") == "1"
+
+
+def dev_login(player_id: str) -> str:
+    """Connexion de développement : crée le compte au besoin, sans lancer de recherche sur ballchasing (le bouton
+    « Chercher mes nouvelles parties » le fait à la demande)."""
+    if not dev_login_enabled():
+        raise PermissionError("connexion de développement désactivée")
+    with store.db() as c:
+        c.execute("INSERT INTO accounts (player_id, last_login) VALUES (%s, now()) "
+                  "ON CONFLICT (player_id) DO UPDATE SET last_login = now()", (player_id,))
+    return player_id
+
+
+def known_players(limit: int = 30) -> list[tuple[str, str | None, int]]:
+    """Joueurs présents dans les parties traitées (identifiant, dernier pseudo, nombre de parties)."""
+    with store.db() as c:
+        return c.execute(
+            "SELECT mp.player_id, max(mp.player_name), count(*) AS n FROM match_players mp "
+            "JOIN matches m ON m.id = mp.match_id WHERE m.status IN ('ok', 'partiel') "
+            "GROUP BY mp.player_id ORDER BY n DESC, mp.player_id LIMIT %s", (limit,)).fetchall()
 
 
 def refresh(player_id: str) -> bool:
@@ -142,74 +154,11 @@ def refresh(player_id: str) -> bool:
     return True
 
 
-def import_state(player_id: str) -> dict:
+def import_state(player_id: str) -> dict[str, Any]:
     with store.db() as c:
         acc = c.execute("SELECT last_sync, sync_started FROM accounts WHERE player_id = %s", (player_id,)).fetchone()
-        done = c.execute("SELECT count(*) FROM match_players mp JOIN matches m ON m.id = mp.match_id "
-                         "WHERE mp.player_id = %s AND m.status IN ('ok', 'partiel')", (player_id,)).fetchone()[0]
-        waiting = c.execute("SELECT count(*) FROM matches WHERE status IN ('en_attente', 'en_cours')").fetchone()[0]
+        done = store.scalar(c, "SELECT count(*) FROM match_players mp JOIN matches m ON m.id = mp.match_id "
+                               "WHERE mp.player_id = %s AND m.status IN ('ok', 'partiel')", (player_id,))
+        waiting = store.scalar(c, "SELECT count(*) FROM matches WHERE status IN ('en_attente', 'en_cours')")
     running = bool(acc and acc[1] and (acc[0] is None or acc[1] > acc[0]))
     return {"last_sync": acc[0] if acc else None, "running": running, "done": done, "waiting": waiting}
-
-
-# --------------------------------------------------------------------------------------------------------------
-# Pages
-
-
-STYLE = """<style>
-:root{--bg:#f6f7f9;--fg:#1d2330;--muted:#5b6475;--card:#fff;--accent:#2f6fde;--line:#dfe3ea}
-@media (prefers-color-scheme:dark){:root{--bg:#12151b;--fg:#e8ebf1;--muted:#9aa3b3;--card:#1b2029;--accent:#6b9cff;--line:#2b3240}}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
-main{max-width:560px;margin:12vh auto;padding:0 16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px}
-h1{font-size:1.4rem;margin:0 0 8px}p{color:var(--muted);margin:.5em 0}
-.btn{display:inline-block;margin-top:16px;padding:10px 18px;border-radius:10px;background:var(--accent);color:#fff;
-text-decoration:none;border:0;font:inherit;cursor:pointer}
-.note{font-size:.9rem}
-</style>"""
-
-
-def page(title: str, body: str, refresh_s: int | None = None) -> str:
-    meta = f'<meta http-equiv="refresh" content="{refresh_s}">' if refresh_s else ""
-    return (f'<!doctype html><html lang="fr"><head><meta charset="utf-8">'
-            f'<meta name="viewport" content="width=device-width,initial-scale=1">{meta}'
-            f"<title>{html.escape(title)}</title>{STYLE}</head><body><main><div class='card'>{body}</div></main>"
-            "</body></html>")
-
-
-def login_page() -> str:
-    return page("RLPI — connexion", "<h1>RLPI — Rocket League Player Index</h1>"
-                "<p>Connecte-toi avec ton compte Steam pour voir les statistiques de tes parties 3v3.</p>"
-                "<p class='note'>Tes parties sont récupérées automatiquement sur ballchasing.com : il faut qu'elles "
-                "y soient envoyées (par toi ou un coéquipier, avec l'envoi automatique de BakkesMod par exemple).</p>"
-                "<a class='btn' href='/connexion'>Se connecter avec Steam</a>")
-
-
-def import_page(player_id: str, st: dict) -> str:
-    if st["running"]:
-        last = "en cours"
-    elif st["last_sync"]:
-        last = "faite le " + st["last_sync"].strftime("%d/%m à %H:%M")
-    else:
-        last = "pas encore commencée (elle démarre dès qu'un worker est libre)"
-    return page("RLPI — import en cours", "<h1>Import de tes parties</h1>"
-                f"<p>Compte : {html.escape(player_id)}</p>"
-                f"<p>Recherche sur ballchasing : {last}.<br>Parties à toi déjà traitées : {st['done']}.<br>"
-                f"Parties en attente de traitement (tous joueurs) : {st['waiting']}.</p>"
-                "<p class='note'>Chaque partie est téléchargée sur ballchasing (une toutes les 18 secondes au plus) "
-                "puis analysée (15 à 40 secondes). Ton tableau de bord s'affiche dès ta première partie traitée. "
-                "La page se met à jour toute seule. Si rien n'arrive, vérifie que tes replays sont publics sur "
-                "ballchasing.com.</p>"
-                "<a class='btn' href='/deconnexion'>Se déconnecter</a>", refresh_s=30)
-
-
-def toolbar(player_id: str, n_games: int, message: str | None = None) -> str:
-    """Petit bandeau ajouté en bas du tableau de bord : nombre de parties, actualiser, déconnexion."""
-    msg = f"<span style='margin-right:12px'>{html.escape(message)}</span>" if message else ""
-    return ("<div style=\"position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;gap:8px;align-items:center;"
-            "flex-wrap:wrap;justify-content:flex-end;max-width:calc(100vw - 32px);font:14px system-ui,sans-serif;"
-            "background:rgba(20,24,32,.92);color:#fff;padding:8px 12px;border-radius:12px\">"
-            f"{msg}<span>{n_games} partie(s)</span>"
-            "<form method='post' action='/moi/actualiser' style='margin:0'><button style='font:inherit;padding:4px 10px;"
-            "border-radius:8px;border:0;cursor:pointer'>Chercher mes nouvelles parties</button></form>"
-            "<a href='/deconnexion' style='color:#cfd8ff'>Se déconnecter</a></div>")

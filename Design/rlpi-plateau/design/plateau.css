@@ -21,13 +21,13 @@
   font-weight: 900;
   line-height: .85;
 }
-.pl-score-xl { font-size: 150px; }
-.pl-score    { font-size: 44px; }
-.pl-name     { font-size: 40px; text-transform: uppercase; }
-.pl-title    { font-size: 28px; text-transform: uppercase; line-height: .9; }
-.pl-body     { font-size: 15px; line-height: 22px; font-weight: 500; }
-.pl-small    { font-size: 13px; line-height: 18px; font-weight: 500; }
-.pl-tag      { font-size: 12px; line-height: 16px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.pl-score-xl { font-size: var(--fs-score-xl); }
+.pl-score    { font-size: var(--fs-score); }
+.pl-name     { font-size: var(--fs-name); text-transform: uppercase; }
+.pl-title    { font-size: var(--fs-title); text-transform: uppercase; line-height: .9; }
+.pl-body     { font-size: var(--fs-body); line-height: 22px; font-weight: 500; }
+.pl-small    { font-size: var(--fs-small); line-height: 18px; font-weight: 500; }
+.pl-tag      { font-size: var(--fs-tag); line-height: 16px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .pl-muted    { color: var(--ink-muted); }
 
 /* --- Coupes en biais ---------------------------------------------------- */
@@ -45,13 +45,13 @@
 .pl-volt { background: var(--accent); color: var(--on-accent); }
 
 /* --- Bandeau de titre --------------------------------------------------- */
-.pl-header { display: flex; align-items: stretch; }
+.pl-header { display: flex; align-items: stretch; flex-wrap: wrap; row-gap: var(--space-2); }
 .pl-header > .pl-volt  { padding: 10px 26px 10px 20px; display: flex; align-items: center; }
 .pl-header > .pl-panel { padding: 6px 30px 4px 24px; margin-left: -6px; display: flex; align-items: center; }
 
 /* --- Pavé de forme (un match) ------------------------------------------- */
-.pl-form { padding: 6px 12px 8px 16px; text-align: center; }
-.pl-form--up   { background: var(--good); color: #fff; }
+.pl-form { padding: 6px 12px 8px 16px; text-align: center; display: block; }
+.pl-form--up   { background: var(--good); color: var(--on-good); }
 .pl-form--down { background: var(--bad);  color: var(--panel-ink); }
 .pl-form--current { outline: 3px solid var(--accent); outline-offset: -3px; }
 

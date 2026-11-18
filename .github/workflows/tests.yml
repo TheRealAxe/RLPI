@@ -1,0 +1,129 @@
+# Tests : lint, mise en forme, types, interface Vue (types de l'API, vue-tsc, vitest, construction), migrations
+# Flyway et pytest.
+# Lancé à chaque push sur une branche de travail et sur chaque pull request ; appelé aussi par deploy.yml avant
+# tout déploiement (un push sur main ne déploie que si ces tests passent).
+#
+# Secret à créer dans le repo (Settings > Secrets and variables > Actions), voir docs/REGLAGES_COOLIFY.md :
+#   RLPI_NOMS_INTERDITS   identifiants Steam et pseudos réels, un par ligne, qui ne doivent jamais apparaître
+#                         dans src/ ni dans tests/ (gardés hors du dépôt pour ne pas les y écrire)
+name: Tests
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
+    secrets:
+      RLPI_NOMS_INTERDITS:
+        required: false
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: rlpi
+          POSTGRES_PASSWORD: rlpi
+          POSTGRES_DB: rlpi
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rlpi -d rlpi" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      FLYWAY_IMAGE: flyway/flyway:13.12.0
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Aucun identifiant ni pseudo réel dans src/ et tests/
+        env:
+          NOMS: ${{ secrets.RLPI_NOMS_INTERDITS }}
+        run: |
+          if [ -z "$NOMS" ]; then
+            echo "::error::Secret RLPI_NOMS_INTERDITS absent : le créer (voir docs/REGLAGES_COOLIFY.md)"
+            exit 1
+          fi
+          printf '%s\n' "$NOMS" | tr -d '\r' | sed '/^[[:space:]]*$/d' > "$RUNNER_TEMP/noms.txt"
+          # Mots entiers, sensible à la casse ; seuls les noms de fichiers sont affichés, jamais les valeurs
+          if grep -rlwF -f "$RUNNER_TEMP/noms.txt" src tests; then
+            echo "::error::Identifiant ou pseudo réel trouvé dans les fichiers ci-dessus"
+            exit 1
+          fi
+          echo "$(wc -l < "$RUNNER_TEMP/noms.txt") valeur(s) cherchée(s) : aucune trouvée"
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.8"
+          enable-cache: true
+
+      - name: Dépendances (uv.lock)
+        run: uv sync --frozen --all-extras
+
+      - name: ruff (lint)
+        run: uv run ruff check --output-format github
+
+      - name: ruff (mise en forme du code neuf ou repris)
+        run: uv run ruff format --check tests scripts src/rlpi/migrate.py src/rlpi/context.py src/rlpi/dashboard src/rlpi/web src/rlpi/events.py src/rlpi/swipe_online.py src/rlpi/logs.py src/rlpi/backup.py
+
+      - name: pyright
+        run: uv run pyright
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.8.1"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Interface (dépendances)
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+
+      - name: Interface (types de l'API à jour)
+        run: |
+          uv run python scripts/export_openapi.py
+          (cd web && npm run api-types)
+          git diff --exit-code -- web/src/api/schema.d.ts || {
+            echo "::error::web/src/api/schema.d.ts n'est plus à jour : lancer scripts/export_openapi.py puis npm run api-types"
+            exit 1
+          }
+
+      - name: Interface (vue-tsc, vitest, construction)
+        working-directory: web
+        run: |
+          npx vue-tsc --noEmit
+          npx vitest run
+          npx vite build
+
+      - name: Flyway sur une base vide
+        run: |
+          PGPASSWORD=rlpi psql -h 127.0.0.1 -U rlpi -d rlpi -c "CREATE DATABASE rlpi_flyway"
+          for cmd in migrate validate info; do
+            docker run --rm --network host -v "$PWD/migrations:/flyway/sql:ro" \
+              -e FLYWAY_URL=jdbc:postgresql://127.0.0.1:5432/rlpi_flyway -e FLYWAY_USER=rlpi -e FLYWAY_PASSWORD=rlpi \
+              -e FLYWAY_BASELINE_ON_MIGRATE=true -e FLYWAY_BASELINE_VERSION=1 -e FLYWAY_CLEAN_DISABLED=true \
+              "$FLYWAY_IMAGE" "$cmd"
+          done
+
+      - name: pytest
+        env:
+          RLPI_TEST_DATABASE_URL: postgresql://rlpi:rlpi@127.0.0.1:5432/rlpi
+          RLPI_FLYWAY_DATABASE_URL: postgresql://rlpi:rlpi@127.0.0.1:5432/rlpi_flyway
+          RLPI_TEST_REQUIRE_DB: "1"
+        run: uv run pytest
+
+      - name: Contenu obtenu si l'instantané a changé
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tableau_de_bord-obtenu
+          path: .pytest_cache/tableau_de_bord.obtenu.json
+          if-no-files-found: ignore

@@ -1,0 +1,56 @@
+{
+ "replay": "partie-08",
+ "file": "partie-08.replay",
+ "status": "ok",
+ "date": "2025-10-08 20-18-04",
+ "match_type": "Private",
+ "n_frames": 3802,
+ "n_touches": 206,
+ "players": [
+  {
+   "slot": 0,
+   "id": "Steam:76561190000000029",
+   "name": "Joueur 029",
+   "team": 0
+  },
+  {
+   "slot": 1,
+   "id": "Steam:76561190000000030",
+   "name": "Joueur 030",
+   "team": 0
+  },
+  {
+   "slot": 2,
+   "id": "Steam:76561190000000031",
+   "name": "Joueur 031",
+   "team": 0
+  },
+  {
+   "slot": 3,
+   "id": "Steam:76561190000000001",
+   "name": "Joueur 001",
+   "team": 1
+  },
+  {
+   "slot": 4,
+   "id": "Steam:76561190000000002",
+   "name": "Joueur 002",
+   "team": 1
+  },
+  {
+   "slot": 5,
+   "id": "Steam:76561190000000003",
+   "name": "Joueur 003",
+   "team": 1
+  }
+ ],
+ "score": [
+  4,
+  1
+ ],
+ "match_guid": "00000000000000000000000000000004",
+ "online_3v3": true,
+ "steps": {},
+ "errors": {},
+ "rempli_par": "scripts/make_fixtures.py"
+}

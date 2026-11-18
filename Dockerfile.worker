@@ -3,20 +3,33 @@
 # préparer sur le serveur.
 FROM python:3.13-slim
 
-# libgomp1 : nécessaire à LightGBM
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+# libgomp1 : nécessaire à LightGBM.
+# postgresql-client-18 : pg_dump / pg_restore de la sauvegarde quotidienne (rlpi.backup), même version majeure que le
+# serveur Postgres (18). Dépôt officiel apt.postgresql.org (Debian n'a que la version 17).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 ca-certificates curl \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
+    && apt-get purge -y curl && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     RLPI_MODELS=/app/models \
-    RLPI_DATA=/tmp/rlpi-data
+    RLPI_DATA=/tmp/rlpi-data \
+    RLPI_LOG_FORMAT=json
 
-# Versions vérifiées le 2026-11-15 (paquets Linux disponibles pour Python 3.13)
-RUN pip install --no-cache-dir "polars>=2.1" "pyarrow>=20" "numpy>=2" "lightgbm==4.7.0" "scikit-learn>=1.9" \
-    "subtr-actor-py==1.5.1" "redis>=5" "boto3>=1.35" "psycopg[binary]>=3.2" "python-dotenv>=1.2" "pyyaml>=6" \
-    "python-ballchasing>=0.5.4"
+# Dépendances : extra « worker » (LightGBM, scikit-learn, subtr-actor-py, ballchasing), versions exactes de uv.lock.
+COPY --from=ghcr.io/astral-sh/uv:0.13.8 /uv /bin/uv
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv UV_COMPILE_BYTECODE=0 UV_LINK_MODE=copy PATH=/app/.venv/bin:$PATH
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project --extra worker && rm -rf /root/.cache
 
 COPY config ./config
 COPY src ./src

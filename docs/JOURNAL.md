@@ -872,3 +872,76 @@ et valeur ajoutée par touche. Le comparatif de parseurs (phase 2) et le 🛑 de
 - `metrics()` : `demo.demos_inflicted` et `bump.bumps_inflicted` absents = 0. Toutes les parties ont désormais leurs
   traits (41/41) ; style attribué sur 6 parties. Effet de bord voulu : la moyenne « Démos infligées » baisse (les
   matchs sans démo n'étaient pas comptés). `styles.json` (appris avec ces trous) n'est pas réentraîné.
+
+## 2026-11-16 — Plan de refonte de l'application web
+
+- Audit du frontend et du backend (hors modèles) : calcul lourd dans la requête HTTP, page HTML complète par
+  filtre, configuration globale qui impose des sous-processus, connexion Postgres + schéma à chaque appel, JSON
+  inséré dans `<script>` sans échappement (XSS probable via un pseudo), aucun test, dépendances divergentes.
+- Plan écrit dans `docs/PLAN_REFONTE_WEB.md` : backend en FastAPI, interface en Vue 3 (Vite + TypeScript),
+  agrégats pré-calculés par le worker, 8 phases (A à H) avec critères de sortie, autres améliorations et
+  décisions à prendre. Rien n'est encore modifié dans le code.
+- Décision : les agrégats de la phase D seront stockés dans Postgres (pas de Parquet + DuckDB dans Garage).
+  DuckDB pourra servir plus tard aux analyses sur tous les joueurs.
+- Décision : plus de tableau de bord public. Chaque joueur ne voit que le sien, après connexion Steam (y compris
+  Théo). `/tableau_de_bord.html` redirigera vers `/moi` dès la phase A ; l'API vérifiera que le joueur demandé est
+  le joueur connecté.
+- Décision : le mode local et l'outil swipe sont portés en Vue. La page autonome sera construite depuis la même
+  application Vue (fichier HTML unique, données intégrées) ; `app.py` est gardé pour lancer l'analyse. Le swipe
+  devient une page de l'application, avec jugements enregistrés en base.
+- Décision : pas d'environnement de recette ; seule la production, déployée à chaque push sur `main`. Les
+  vérifications se font avant le push (CI, essai local).
+- Décision : les onglets ont des adresses en chemin (`/ma-forme`…), avec règle de repli côté FastAPI ; mode ancre
+  uniquement dans la page autonome locale. Toutes les décisions du § 5 du plan sont prises.
+- Améliorations du § 4 retenues et placées dans les phases : sessions révocables (phase E, sans déconnecter
+  personne à la transition) ; `matches.played_at` en `timestamptz` et contrainte `CHECK` sur `matches.status`
+  (phase D, étape 0) ; types vérifiés par pyright (phase B) ; découpage de `dashboard.py` (phase D) ; textes de
+  l'interface rassemblés depuis `COPY.md` (phase F). Améliorations du worker (lettre morte, mesures,
+  téléchargements en parallèle) retenues mais repoussées après la refonte : nouvelle phase I, après H.
+- § 4 « Produit », formulation corrigée (non encore retenue) : la notification porte sur chaque nouveau match
+  traité, pas seulement sur le premier import d'un joueur. Elle couvre la page d'attente (rechargée toutes les
+  30 s) et le bouton « Chercher mes nouvelles parties » (aujourd'hui il faut recharger soi-même).
+- § 4 « Produit » tranché : notification à chaque nouveau match traité **retenue** (le worker publie sur Redis,
+  `GET /api/moi/evenements` relaie en SSE en phase E ; l'application Vue affiche un message et recharge ses
+  données sans recharger la page en phase F, avec repli par interrogation de `/api/moi`). Liens partageables
+  vers un match ou une période **écartés pour le moment** ; les filtres restent dans l'adresse.
+- § 4 « Sécurité et comptes » : CSP stricte, limitation de débit et données personnelles (page confidentialité,
+  suppression de compte, retrait de pseudo) **écartées pour le moment**. Tout le § 4 est tranché.
+- Préparation du démarrage (rien n'est encore commencé) :
+  - **Git** : un commit par phase, fait par Claude, sur la branche courante `feature/amelioration-logicielle`,
+    poussée sur GitHub ; la fusion dans `main` (donc la mise en production) reste faite par Théo. Arrêt à la fin
+    de chaque phase pour que Théo lance `/compact` avant la suivante.
+  - **Jeu d'essai** (phase B) : quelques vraies parties versionnées dans `tests/fixtures/`, pseudos et
+    identifiants Steam remplacés par des valeurs fictives.
+  - **Migrations sur la production** (phase D, étape 0) : pas d'accès manuel à la base ; les migrations
+    versionnées, lancées au démarrage, font elles-mêmes les vérifications (valeurs de `played_at` illisibles
+    écrites dans les journaux avant mise à `NULL` ; arrêt avec la liste des lignes fautives si un `status`
+    inconnu existe).
+  - **Coolify** : chaque réglage manuel (variables, mémoire, processus uvicorn…) est noté au fil des phases dans
+    `docs/REGLAGES_COOLIFY.md`, que Théo applique.
+  - **Phase G allégée** : pas de copie de la base hors du serveur ni d'alerte pour le moment ; la sauvegarde
+    quotidienne dans Garage, `/ready` et les journaux structurés restent.
+  - **Mode local** : filtres calculés dans le navigateur à partir des lignes par partie (option b). Conséquence :
+    les sections non additives (style, synergie, progression, meilleur jeu) devront exister aussi en TypeScript ;
+    le test de comparaison site / page autonome est étendu à plusieurs combinaisons de filtres.
+  - **Swipe** : aucun fichier de jugements existant, rien à importer.
+- Décision : migrations avec **Flyway**, en « DB first » (schéma défini par des fichiers SQL versionnés dans
+  `migrations/`, pas d'ORM). Mis en place en phase B : `V1__schema_initial.sql` reprend le schéma actuel, la base
+  de production est marquée à la version 1 sans réexécution ; serveur et worker ne font plus de `CREATE`/`ALTER`.
+  Les migrations de la phase D (`played_at`, `status`) sont des migrations Flyway qui se vérifient elles-mêmes.
+
+## 2026-11-18 — Refonte de l'application web terminée (conséquences pour ce journal)
+
+La refonte du site (phases A à I de `docs/PLAN_REFONTE_WEB.md`) est suivie dans `docs/JOURNAL_REFONTE_WEB.md`.
+Ce qui change pour le travail sur les modèles et les indicateurs :
+- Le tableau de bord n'est plus une page HTML générée : le worker calcule les agrégats de chaque partie
+  (`src/rlpi/dashboard/aggregate.py`), l'API calcule le contenu (`content.py`), l'interface Vue (`web/`) l'affiche.
+  Changer un calcul par partie : augmenter `aggregate.VERSION` (les workers recalculent les parties concernées).
+- `python -m rlpi.dashboard --player …` écrit le même contenu en JSON (`reports/tableau_de_bord.json`) ; l'ancien
+  gabarit (`dashboard_template.html`) et les polices intégrées (`fonts.py`) sont supprimés.
+- « Les modèles » est une page du site (`/modeles`, contenu de `rlpi.models_page.content`) ;
+  `python -m rlpi.models_page` n'existe plus.
+- Fantôme pro, meilleur jeu et revue des resets restent des générateurs en ligne de commande (`rlpi.ghost`,
+  `rlpi.bestplay`, `rlpi.mechanics`), hors du site.
+- L'instantané `tests/test_snapshot.py` garde les chiffres : un changement voulu d'indicateur se fait avec
+  `--update-snapshot` et une ligne dans ce journal.

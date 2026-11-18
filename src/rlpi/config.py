@@ -22,17 +22,10 @@ CONFIG = ROOT / "config"
 # Décisions validées (voir docs/JOURNAL.md)
 GAME_MODE = "ranked-standard"  # 3v3
 
-# Nom de la source des parties du joueur suivi : fichiers data/frames/<source>/ et data/features/*_<source>.*
-# « theo » pour les données de Théo (tableau de bord en ligne) ; le kit partagé utilise « perso ».
-SOURCE = os.getenv("RLPI_SOURCE", "theo").strip() or "theo"
-
-# Profil suivi (voir .env.example) : identifiant du joueur et coéquipiers à comparer.
-# Source « theo » sans réglage : profil de Théo et ses coéquipiers habituels (comportement d'avant la
-# généralisation). Pour toute autre source, vide par défaut (détecté par l'application).
-_THEO = SOURCE == "theo"
-PLAYER = os.getenv("RLPI_PLAYER", "").strip() or ("Steam:76561198078330309" if _THEO else "")
-COMPARE = [s.strip() for s in (os.getenv("RLPI_COMPARE", "").strip() or ("LAinox,Rileq" if _THEO else "")).split(",")
-           if s.strip()]
+# Nom de la source des parties suivies : fichiers data/frames/<source>/ et data/features/*_<source>.* (« perso »
+# par défaut). Aucun joueur n'est fixé dans le code : le joueur est celui de la session (site) ou celui passé en
+# paramètre (--player des commandes).
+SOURCE = os.getenv("RLPI_SOURCE", "perso").strip() or "perso"
 
 
 def ballchasing_token() -> str:

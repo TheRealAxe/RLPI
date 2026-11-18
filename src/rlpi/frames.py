@@ -188,7 +188,6 @@ def main() -> None:
         return
     roots = [Path(d) for d in a.dir] if a.dir else [RAW / a.source]
     files = sorted((f for r in roots for f in r.rglob("*.replay")), key=lambda p: p.stat().st_mtime, reverse=True)
-    root = ", ".join(str(r) for r in roots)
     if a.limit:
         files = files[: a.limit]
     out_dir = FRAMES / a.source

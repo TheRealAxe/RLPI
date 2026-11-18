@@ -24,10 +24,8 @@ import math
 import numpy as np
 import polars as pl
 
-import os
-
 from rlpi.config import FEATURES, FRAMES, MODELS, SOURCE
-from rlpi.decisions import ACTION_FR, TARGET, TOUCHER
+from rlpi.decisions import TARGET, TOUCHER
 from rlpi.value import FEATURE_NAMES, features, labels_and_score, load_replay
 
 N_BINS = 16
@@ -205,6 +203,7 @@ def formation_block(f: pl.DataFrame, m: dict, i: int, slot: int, team: int) -> d
     joueurs, à qui revenait la balle avant la touche, et valeur de l'équipe réelle vs « les trois placés
     comme une formation pro » (adversaires et balle inchangés)."""
     import lightgbm as lgb
+
     from rlpi.formation import ROLE_FR, assign, own_positions, predict
 
     s = 1.0 if team == 0 else -1.0
@@ -272,6 +271,7 @@ def approach_block(f: pl.DataFrame, m: dict, i: int, slot: int, team: int) -> di
     """Approche idéale du toucheur (modèle `approach`) et coût du placement : valeur de l'équipe image par image,
     réelle et « si tu étais à la position idéale » (le reste de la scène inchangé)."""
     import lightgbm as lgb
+
     from rlpi.approach import TAUS, _arrays, situation
 
     s = 1.0 if team == 0 else -1.0
@@ -482,7 +482,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["extract", "train", "export", "worst"])
     ap.add_argument("--source", default="rlcs")
-    ap.add_argument("--player", default=os.getenv("RLPI_PLAYER", ""))
+    ap.add_argument("--player", help="export, worst : pseudo ou identifiant du joueur (obligatoire)")
     ap.add_argument("--since", default="2026-11-14")
     ap.add_argument("--rank", type=int, default=0)
     ap.add_argument("--at", default="", help="moment précis : \"AAAA-MM-JJ HH-MM-SS@t_s\"")
@@ -490,6 +490,8 @@ def main() -> None:
     ap.add_argument("--games", type=int, default=10, help="worst : nombre de dernières parties")
     ap.add_argument("--k", type=int, default=5, help="worst : nombre d'actions")
     a = ap.parse_args()
+    if a.cmd in ("export", "worst") and not a.player:
+        ap.error(f"{a.cmd} : --player est obligatoire")
     if a.cmd == "extract":
         extract(a.source)
     elif a.cmd == "train":

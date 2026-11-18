@@ -1,0 +1,105 @@
+# Environnement de développement local : Postgres, Redis, Garage (S3), migrations Flyway, serveur et worker.
+# DÉVELOPPEMENT SEULEMENT : mots de passe et clés fixes, connexion sans Steam (RLPI_DEV_LOGIN=1).
+#
+#   docker compose -f docker-compose.dev.yml up -d --build
+#   .venv/Scripts/python scripts/dev_setup.py          # Garage (une fois) + remplissage depuis rlpi-data-lainox/
+#   docker compose -f docker-compose.dev.yml exec worker python -m rlpi.worker enqueue /replays/*.replay
+#   → http://localhost:3001/dev/connexion   (documentation de l'API : http://localhost:3001/docs)
+#
+# Tout effacer (base, file, stockage) : docker compose -f docker-compose.dev.yml down -v
+#
+# BALLCHASING_TOKEN est lu dans .env (vrai jeton : recherche de nouvelles parties testable de bout en bout).
+# Pour ménager l'API : pas de recherche automatique (RLPI_SYNC_MINUTES=0) et 5 parties au premier passage.
+
+x-rlpi-env: &rlpi-env
+  DATABASE_URL: postgresql://rlpi:rlpi@postgres:5432/rlpi
+  REDIS_URL: redis://redis:6379/0
+  S3_ENDPOINT: http://garage:3900
+  S3_ACCESS_KEY: GKb56db53a9f4c57c9ac99c9b6
+  S3_SECRET_KEY: 753906dc8f3f63bc92b6592df7eb33b30892406c383742bb308691970f5382b7
+  S3_BUCKET: rlpi
+  S3_REGION: garage
+  BALLCHASING_TOKEN: ${BALLCHASING_TOKEN:-}
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: rlpi
+      POSTGRES_PASSWORD: rlpi
+      POSTGRES_DB: rlpi
+    # Journal des connexions : permet de vérifier qu'une page servie depuis le cache n'en ouvre aucune
+    command: ["postgres", "-c", "log_connections=on"]
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["pg:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rlpi -d rlpi"]
+      interval: 2s
+      retries: 30
+
+  redis:
+    image: redis:8
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  # Migrations (migrations/V*__*.sql) passées avant le serveur et le worker. Le serveur les relance aussi à son
+  # démarrage, comme en production (sans effet si la base est à jour). État : docker compose … run --rm flyway info
+  flyway:
+    image: flyway/flyway:13.12.0
+    command: ["migrate"]
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/rlpi
+      FLYWAY_USER: rlpi
+      FLYWAY_PASSWORD: rlpi
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_BASELINE_ON_MIGRATE: "true"
+      FLYWAY_BASELINE_VERSION: "1"
+      FLYWAY_CLEAN_DISABLED: "true"
+    volumes: ["./migrations:/flyway/sql:ro"]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  garage:
+    image: dxflrs/garage:v2.3.0
+    ports: ["127.0.0.1:3900:3900"]
+    volumes:
+      - ./dev/garage.toml:/etc/garage.toml:ro
+      - garage:/var/lib/garage
+
+  server:
+    build: {context: ., dockerfile: Dockerfile}
+    environment:
+      <<: *rlpi-env
+      RLPI_PUBLIC_URL: http://localhost:3001
+      RLPI_SECRET: dev-seulement-0123456789abcdef0123456789abcdef
+      RLPI_DEV_LOGIN: "1"
+    ports: ["127.0.0.1:3001:3001"]
+    volumes:
+      # Comme le volume /app/data de production : références (RLCS, SSL), rapports des modèles, pages statiques
+      - ./rlpi-data-lainox:/app/data:ro
+    depends_on:
+      flyway: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      garage: {condition: service_started}
+
+  worker:
+    build: {context: ., dockerfile: Dockerfile.worker}
+    environment:
+      <<: *rlpi-env
+      RLPI_WORKER_ID: dev-1
+      RLPI_SYNC_MINUTES: "0"
+      RLPI_FIRST_SYNC: "5"
+      RLPI_BACKUP_HOUR: "off"  # sauvegarde à la demande : python -m rlpi.backup run
+    volumes:
+      - ./data/raw:/replays:ro
+    depends_on:
+      flyway: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      garage: {condition: service_started}
+
+volumes:
+  pg:
+  garage:

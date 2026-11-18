@@ -15,8 +15,6 @@ import json
 import numpy as np
 import polars as pl
 
-import os
-
 from rlpi.config import FEATURES, FRAMES, SOURCE
 from rlpi.decisions import ACTION_FR, ACTIONS
 from rlpi.value import load_replay
@@ -46,7 +44,8 @@ def state_vec(f: pl.DataFrame, m: dict, i: int, slot: int, team: int, flip: floa
     bvel = np.array([flip * s * f["ball_vx"][i], s * f["ball_vy"][i], f["ball_vz"][i]])
     mates = [p["slot"] for p in m["players"] if p["team"] == team and p["slot"] != slot]
     opps = [p["slot"] for p in m["players"] if p["team"] != team]
-    by_d = lambda ks: sorted(ks, key=lambda k: np.linalg.norm(P(k) - ball))
+    def by_d(ks):
+        return sorted(ks, key=lambda k: np.linalg.norm(P(k) - ball))
     mates, opps = by_d(mates)[:2], by_d(opps)[:3]
     if len(mates) < 2 or len(opps) < 3:
         return None
@@ -62,7 +61,8 @@ def track(f: pl.DataFrame, m: dict, i: int, slot: int, team: int, flip: float) -
     s = 1.0 if team == 0 else -1.0
     lo, hi = max(0, i - BEFORE), min(f.height - 1, i + AFTER)
     w = f.slice(lo, hi - lo + 1)
-    r = lambda a: [round(float(v), 0) for v in a]
+    def r(a):
+        return [round(float(v), 0) for v in a]
     out = {"ball": {"x": r(flip * s * w["ball_x"]), "y": r(s * w["ball_y"]), "z": r(w["ball_z"])},
            "t0": i - lo, "cars": []}
     for p in m["players"]:
@@ -91,7 +91,7 @@ def pick_target(player: str, since: str, rank: int) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--player", default=os.getenv("RLPI_PLAYER", ""))
+    ap.add_argument("--player", required=True, help="pseudo ou identifiant du joueur")
     ap.add_argument("--since", default="2026-11-14")
     ap.add_argument("--rank", type=int, default=0)
     ap.add_argument("--ref", default="rlcs")

@@ -21,7 +21,8 @@ from itertools import combinations
 import numpy as np
 import polars as pl
 
-from rlpi.config import FEATURES, FRAMES, SOURCE
+from rlpi.config import SOURCE
+from rlpi.context import DataContext, resolve
 
 FPS = 10
 CHAIN_S = 3.0
@@ -33,7 +34,7 @@ def pair_rows(m: dict, f: pl.DataFrame, tv: pl.DataFrame, mean_dv: dict[str, flo
     bx, by = f["ball_x"].to_numpy(), f["ball_y"].to_numpy()
     slot = {p["id"]: p["slot"] for p in m["players"]}
     tv = tv.sort("i")
-    ti, tp, tt, tdv = tv["i"].to_numpy(), tv["player_id"].to_list(), tv["team"].to_numpy(), tv["dv"].to_numpy()
+    ti, tp, _tt, tdv = tv["i"].to_numpy(), tv["player_id"].to_list(), tv["team"].to_numpy(), tv["dv"].to_numpy()
     out = []
     for team in (0, 1):
         s = 1 if team == 0 else -1
@@ -71,11 +72,12 @@ def pair_rows(m: dict, f: pl.DataFrame, tv: pl.DataFrame, mean_dv: dict[str, flo
     return out
 
 
-def run(source: str, limit: int | None) -> pl.DataFrame:
-    tv_all = pl.read_parquet(FEATURES / f"touch_values_{source}.parquet")
+def run(source: str, limit: int | None, ctx: DataContext | None = None) -> pl.DataFrame:
+    ctx = resolve(ctx)
+    tv_all = pl.read_parquet(ctx.feature("touch_values", source))
     mean_dv = dict(tv_all.group_by("player_id").agg(pl.col("dv").mean()).iter_rows())
     rows = []
-    for mp in sorted((FRAMES / source).glob("*.meta.json"))[:limit]:
+    for mp in sorted(ctx.frames(source).glob("*.meta.json"))[:limit]:
         m = json.loads(mp.read_text(encoding="utf-8"))
         tv = tv_all.filter(pl.col("replay") == m["replay"])
         if tv.is_empty():
@@ -84,7 +86,7 @@ def run(source: str, limit: int | None) -> pl.DataFrame:
         rows += pair_rows(m, f, tv, mean_dv)
     df = pl.DataFrame(rows).with_columns(pl.lit(source).alias("source"))
     if limit is None:
-        df.write_parquet(FEATURES / f"synergy_{source}.parquet")
+        df.write_parquet(ctx.feature("synergy", source))
     return df
 
 

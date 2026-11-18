@@ -1,5 +1,5 @@
-/* RLPI · Plateau — jetons de design. Source : tokens.json. */
-@import url("https://fonts.googleapis.com/css2?family=Sofia+Sans+Extra+Condensed:ital,wght@1,800;1,900&family=Sofia+Sans:wght@400;500;700;800&display=swap");
+/* RLPI · Plateau — jetons de design. Source : tokens.json.
+   Polices : servies par l'application (src/rlpi/assets/fonts/fonts.css), plus par Google Fonts. */
 
 :root {
   color-scheme: dark;
@@ -43,4 +43,21 @@
   --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-12: 48px;
 
   --cut-sm: 10px; --cut-md: 14px; --cut-lg: 16px;
+}
+
+/* Jetons ajoutés pour l'application (relevés dans l'ancien gabarit, valeurs inchangées) :
+   texte sur --good, échelle typographique, tailles « display » intermédiaires de COMPONENTS.md,
+   gabarits de mise en page, durée des mouvements. */
+:root {
+  --on-good: #ffffff;              /* texte blanc sur --good (5,7:1, tokens.json) */
+  --fs-score-xl: 150px; --fs-score: 44px; --fs-name: 40px; --fs-title: 28px;
+  --fs-lead: 18px; --fs-body: 15px; --fs-small: 13px; --fs-tag: 12px; --fs-axis: 11px;
+  --dx-64: 64px; --dx-56: 56px; --dx-34: 34px; --dx-30: 30px; --dx-26: 26px; --dx-24: 24px; --dx-22: 22px;
+  --page-max: 1100px; --page-pad: 30px; --side-col: 300px; --method-w: 420px; --sym: 14px;
+  --t-move: 150ms;
+  /* Scène du swipe (rendu 3D d'une action, rlpi swipe) : couleurs du rendu d'origine, pour la légende */
+  --scene-team: #3d8bef; --scene-opp: #f0702f; --scene-judged: #f5c542;
+}
+@media (max-width: 720px) {
+  :root { --fs-score-xl: 104px; --dx-64: 44px; --dx-56: 44px; --page-pad: 16px; }
 }

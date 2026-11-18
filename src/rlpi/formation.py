@@ -19,7 +19,6 @@ import itertools
 import json
 
 import numpy as np
-import polars as pl
 
 from rlpi.config import FRAMES, MODELS
 from rlpi.value import load_replay

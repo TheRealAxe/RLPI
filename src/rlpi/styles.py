@@ -15,18 +15,27 @@ import json
 import numpy as np
 import polars as pl
 
-from rlpi import config
-from rlpi.config import FEATURES, FRAMES, MODELS
-
-ME = config.PLAYER
+from rlpi.config import MODELS
+from rlpi.context import DataContext, resolve
 
 
-def traits(source: str) -> pl.DataFrame:
+def traits(source: str, ctx: DataContext | None = None) -> pl.DataFrame:
     """Traits de style par joueur-match (indépendants du résultat autant que possible)."""
-    from rlpi.dashboard import metrics
     from rlpi.perf import touch_xv
 
-    st = metrics(pl.read_parquet(FEATURES / f"player_match_stats_{source}.parquet")).filter(~pl.col("is_bot"))
+    ctx = resolve(ctx)
+    play_s = {}
+    for mp in ctx.frames(source).glob("*.meta.json"):
+        m = json.loads(mp.read_text(encoding="utf-8")); play_s[m["replay"]] = m["n_play_frames"] / 10
+    return traits_from(pl.read_parquet(ctx.feature("player_match_stats", source)), touch_xv(source, ctx), play_s)
+
+
+def traits_from(stats: pl.DataFrame, tv_xv: pl.DataFrame, play_s: dict[str, float]) -> pl.DataFrame:
+    """Traits à partir des tables : stats subtr-actor, touches valorisées (rlpi.perf.touch_xv), durée de jeu par
+    partie. Utilisé pour toute une source (traits) ou pour une seule partie (agrégats du worker)."""
+    from rlpi.dashboard.metrics import metrics
+
+    st = metrics(stats).filter(~pl.col("is_bot"))
     st = st.with_columns(pl.col("replay_file").str.replace(r"\.replay$", "").str.replace(r"^.*[\\/]", "").alias("replay"))
     M = pl.col("movement.tracked_time") / 300
     st = st.with_columns(
@@ -38,10 +47,7 @@ def traits(source: str) -> pl.DataFrame:
         tiers_def=100 * pl.col("positioning.time_defensive_third") / pl.col("positioning.tracked_time"),
         possession=100 * pl.col("positioning.time_has_possession") / pl.col("positioning.tracked_time"),
     )
-    play_s = {}
-    for mp in (FRAMES / source).glob("*.meta.json"):
-        m = json.loads(mp.read_text(encoding="utf-8")); play_s[m["replay"]] = m["n_play_frames"] / 10
-    tv = touch_xv(source).with_columns(pl.col("replay").replace_strict(play_s, default=None).alias("s"))
+    tv = tv_xv.with_columns(pl.col("replay").replace_strict(play_s, default=None).alias("s"))
     t = tv.group_by("replay", "player_id").agg(
         (pl.len() / pl.col("s").first() * 300).alias("touches"),
         (pl.col("height") == "high_air").mean().mul(100).alias("t_haut"),
