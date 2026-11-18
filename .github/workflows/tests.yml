@@ -60,7 +60,7 @@ jobs:
           fi
           echo "$(wc -l < "$RUNNER_TEMP/noms.txt") valeur(s) cherchée(s) : aucune trouvée"
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.8"
           enable-cache: true
