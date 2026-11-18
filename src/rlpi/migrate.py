@@ -42,7 +42,7 @@ def flyway_env(database_url: str, locations: Path) -> dict[str, str]:
         "FLYWAY_LOCATIONS": f"filesystem:{locations}",
         "FLYWAY_BASELINE_ON_MIGRATE": "true",
         "FLYWAY_BASELINE_VERSION": "1",
-        "FLYWAY_BASELINE_DESCRIPTION": "schema de production d'avant Flyway",
+        "FLYWAY_BASELINE_DESCRIPTION": "schema de production avant Flyway",  # sans apostrophe : Flyway la colle telle quelle dans du SQL
         "FLYWAY_CONNECT_RETRIES": "12",  # Postgres pas encore prêt (redémarrage du serveur) : ~1 min d'attente
         "FLYWAY_VALIDATE_MIGRATION_NAMING": "true",
         "FLYWAY_CLEAN_DISABLED": "true",  # « flyway clean » efface tout : interdit

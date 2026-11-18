@@ -32,6 +32,7 @@ def test_flyway_env():
     assert (e["FLYWAY_USER"], e["FLYWAY_PASSWORD"]) == ("rlpi", "p@ss:w")
     assert e["FLYWAY_LOCATIONS"] == f"filesystem:{Path('/m')}"
     assert e["FLYWAY_BASELINE_ON_MIGRATE"] == "true" and e["FLYWAY_BASELINE_VERSION"] == "1"
+    assert "'" not in e["FLYWAY_BASELINE_DESCRIPTION"]  # sinon le SQL du baseline de Flyway est cassé
     assert e["FLYWAY_CLEAN_DISABLED"] == "true"
     assert migrate.flyway_env("postgres://u@h/b", Path("/m"))["FLYWAY_URL"] == "jdbc:postgresql://h:5432/b"
     with pytest.raises(SystemExit):
