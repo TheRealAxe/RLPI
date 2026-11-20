@@ -615,19 +615,33 @@ def test_ralenti_d_une_touche(app_db):
     assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "en_attente"}
     assert [json.loads(x) for x in r.lrange(store.QUEUE, 0, -1)] == [{"type": "clip", "match": "m1", "player": ME}]
     # Ce que fait le worker : ralenti prêt
-    clip = {"id": "m1:120", "fps": 30, "action_frame": 120, "ball": [], "ball_v": [], "cars": []}
+    clip = {
+        "id": "m1:120",
+        "format": 2,
+        "fps": 30,
+        "t0": 120,
+        "ball": {"x": [], "y": [], "z": []},
+        "cars": [],
+        "cam": None,
+    }
     with psycopg.connect(db, autocommit=True) as conn:
         conn.execute("UPDATE clips SET status = 'pret', clip = %s WHERE match_id = 'm1'", (Jsonb(clip),))
     got = c.get("/api/clips/m1/120")
     assert got.json() == {"statut": "pret", "erreur": None, "clip": clip} and "max-age" in got.headers["cache-control"]
     assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "pret"}
     assert r.llen(store.QUEUE) == 1  # rien de plus à fabriquer
+    # Un ralenti d'un ancien format (vue du swipe) est considéré comme absent et refait
+    with psycopg.connect(db, autocommit=True) as conn:
+        conn.execute("UPDATE clips SET clip = %s WHERE match_id = 'm1'", (Jsonb({"id": "m1:120", "fps": 30}),))
+    assert c.get("/api/clips/m1/120").json()["statut"] == "aucun"
+    assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "en_attente"}
+    assert r.llen(store.QUEUE) == 2
     # Un ralenti en erreur est redemandé
     with psycopg.connect(db, autocommit=True) as conn:
         conn.execute("UPDATE clips SET status = 'erreur', error = 'x', clip = NULL WHERE match_id = 'm1'")
     assert c.get("/api/clips/m1/120").json()["statut"] == "erreur"
     assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "en_attente"}
-    assert r.llen(store.QUEUE) == 2
+    assert r.llen(store.QUEUE) == 3
     # Les ralentis d'un autre joueur ne se lisent pas
     login(c, other, db)
     assert c.get("/api/clips/m1/120").json()["statut"] == "aucun"

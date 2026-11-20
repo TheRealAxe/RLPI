@@ -3,19 +3,23 @@
 1. L'API (POST /api/clips) note la demande : une ligne « en_attente » pour (partie, joueur, touche), et une tâche
    {"type": "clip", "match": id, "player": id} dans la file Redis. Seules les parties où joue le joueur connecté
    sont acceptées, et seulement ses propres touches.
-2. Un worker télécharge la partie analysée et son replay brut, découpe le ralenti de chaque touche demandée (même
-   lecteur que le swipe : rlpi.swipe.extract, 30 images/s) et, au passage, ceux des autres touches les plus coûteuses
-   du joueur dans cette partie (le replay est déjà lu : les clics suivants sont immédiats).
+2. Un worker télécharge la partie analysée et son replay brut, découpe le ralenti de chaque touche demandée au
+   format du player 3D (rlpi.pov : 30 images/s, saut / dodge, réglages caméra du joueur) et, au passage, ceux des
+   autres touches les plus coûteuses du joueur dans cette partie (les clics suivants sont immédiats).
+   Un ralenti d'un format plus ancien (pov.FORMAT) est considéré comme absent : il est refait à la demande.
 3. L'interface interroge GET /api/clips/{partie}/{image} jusqu'à ce que le ralenti soit prêt.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from rlpi.pov import FORMAT
 
 if TYPE_CHECKING:
     import psycopg
@@ -42,6 +46,8 @@ def get(conn: psycopg.Connection, player: str, match_id: str, i: int) -> dict:
     if row is None:
         return {"statut": "aucun", "erreur": None, "clip": None}
     status, error, clip = row
+    if status == "pret" and (clip or {}).get("format") != FORMAT:
+        return {"statut": "aucun", "erreur": None, "clip": None}  # ancien format : à refaire
     return {"statut": status, "erreur": error, "clip": clip if status == "pret" else None}
 
 
@@ -53,8 +59,9 @@ def request(conn: psycopg.Connection, player: str, match_id: str, i: int) -> tup
         "ON CONFLICT (match_id, player_id, i) DO UPDATE SET status = 'en_attente', error = NULL, created_at = now() "
         "WHERE clips.status = 'erreur' OR (clips.status = 'en_attente' "
         "AND clips.created_at < now() - make_interval(mins => %s)) "
+        "OR (clips.status = 'pret' AND clips.clip->>'format' IS DISTINCT FROM %s) "
         "RETURNING status",
-        (match_id, player, i, RETRY_AFTER_MIN),
+        (match_id, player, i, RETRY_AFTER_MIN, str(FORMAT)),
     ).fetchone()
     if row is not None:  # nouvelle demande ou relance
         return "en_attente", True
@@ -91,7 +98,7 @@ def build(
     import polars as pl
     from psycopg.types.json import Jsonb
 
-    from rlpi import swipe
+    from rlpi import pov
     from rlpi.dashboard.storage import download_game
     from rlpi.game import GAME_SOURCE
 
@@ -115,12 +122,12 @@ def build(
         todo = picks(tv, player, wanted)
         made: dict[int, dict] = {}
         if todo:
+            fd = d / "frames" / GAME_SOURCE
             replay = todo[0]["replay"]
-            for card in swipe.extract(
-                "perso", replay, todo, d / "frames" / GAME_SOURCE, raw, before=BEFORE_S, after=AFTER_S
-            ):
-                i = int(card["id"].rsplit(":", 1)[1])
-                made[i] = {k: v for k, v in card.items() if k != "origin"} | {"id": f"{match_id}:{i}"}
+            meta = json.loads((fd / f"{replay}.meta.json").read_text(encoding="utf-8"))
+            ball10 = pl.read_parquet(fd / f"{replay}.parquet", columns=["ball_x", "ball_y", "ball_z"]).to_numpy()
+            for i, clip in pov.extract(raw, meta, ball10, player, [p["i"] for p in todo], BEFORE_S, AFTER_S).items():
+                made[i] = clip | {"id": f"{match_id}:{i}"}
         for i, clip in made.items():
             conn.execute(
                 "INSERT INTO clips (match_id, player_id, i, status, clip, ready_at) VALUES (%s, %s, %s, 'pret', %s, now()) "
