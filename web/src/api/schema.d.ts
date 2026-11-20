@@ -29,7 +29,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Clip 3D d'une touche (3 s avant, 1 s après, 30 images/s), découpé dans le replay
+         * Clip 3D d'une touche (4 s avant, 2 s après, 30 images/s), découpé dans le replay
          * @description Le replay brut est lu au premier clic sur un match (moins d'une seconde) ; les clips suivants du même match et les clips déjà vus sont servis depuis la mémoire.
          */
         get: operations["clip_api_joueurs__id__matchs__match__clips__i__get"];

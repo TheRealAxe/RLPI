@@ -75,8 +75,14 @@ def test_cut_shape_and_bounds():
 
 def test_cut_with_cameras():
     t = synthetic()  # pas de colonne de temps : temps = index / 120 ; touche à l'image 600 = 5 s
-    cams = {"players": {"Steam:4": {"settings": {"fov": 110.0, "distance": 270.0, "height": 100.0, "angle": -3.0,
-                                                 "stiffness": 0.5}, "ball_cam": [[4.0, 0], [5.5, 1]]}}}
+    cams = {
+        "players": {
+            "Steam:4": {
+                "settings": {"fov": 110.0, "distance": 270.0, "height": 100.0, "angle": -3.0, "stiffness": 0.5},
+                "ball_cam": [[4.0, 0], [5.5, 1]],
+            }
+        }
+    }
     card = clips.cut(t, META, 600, "Steam:4", cams=cams)
     assert card is not None and card["cam"]["distance"] == 270.0 and card["cam"]["known"]
     bc = card["cam"]["ball_cam"]  # clip de 2 s à 6 s : avant 4 s, état de la 1re bascule
@@ -172,3 +178,19 @@ def test_swipe_extract_uses_clips(real):
     cards = swipe.extract("perso", rid, picks, out, RAW[0])
     assert cards and {c["id"] for c in cards} <= {f"perso:{rid}:{p['i']}" for p in picks}
     assert list(cards[0]) == ["id", "origin", "action", "fps", "action_frame", "ball", "ball_v", "cars"]
+
+
+def test_resample_objet_immobile_tenu_sans_vitesse_perimee():
+    """Balle immobile 4 s avant l'engagement avec une vitesse enregistrée périmée : elle reste immobile jusqu'à sa
+    mise à jour suivante au lieu de dériver (défaut vu sur les clips de 4 s)."""
+    src, n = 120, 5 * 120
+    pos = np.zeros((n, 3))
+    pos[:, 2] = 93
+    pos[481:, 0] = np.arange(1, n - 480) * 10.0  # mise en mouvement à 4 s
+    vel = np.zeros((n, 3))
+    vel[:481] = [3000.0, -2000.0, 500.0]  # vitesse périmée pendant l'immobilité
+    vel[481:, 0] = 1200.0
+    p, v = clips.resample(pos, vel, src, 151, 30)
+    assert np.abs(p[:121] - [0, 0, 93]).max() < 1e-6  # immobile jusqu'à la touche (image 120 = 4 s)
+    assert np.abs(v[:120]).max() == 0
+    assert p[-1][0] > 0  # puis la balle part

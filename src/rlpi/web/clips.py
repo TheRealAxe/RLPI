@@ -40,7 +40,8 @@ import polars as pl
 from rlpi import clips
 from rlpi.web.cache import JsonCache, KeyedLocks
 
-VERSION = 2  # version de la découpe : à augmenter quand le contenu d'un clip change (ETag)
+VERSION = 3  # version de la découpe : à augmenter quand le contenu d'un clip change (ETag) ; 3 : 4 s avant, 2 s après
+BEFORE_S, AFTER_S = 4.0, 2.0  # secondes montrées avant et après la touche (le Swipe garde 3 s / 1 s)
 MAX_READS = 2
 MAX_CLIPS = 300
 GAME_SOURCE = "partie"  # comme rlpi.game
@@ -202,7 +203,7 @@ class ClipService:
         j = clips.locate(game.track, i, ball_xy)
         if j is None:
             raise NOT_LOCATED
-        card = clips.cut(game.track, game.meta, j, judged, cams=game.cams or {})
+        card = clips.cut(game.track, game.meta, j, judged, before=BEFORE_S, after=AFTER_S, cams=game.cams or {})
         if card is None:
             raise AT_EDGE
         return {"id": f"{match_id}:{i}", **card}

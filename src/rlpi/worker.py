@@ -472,6 +472,8 @@ class Worker:
             self.process_aggregate(task["match"], raw)
         elif task.get("type") == "swipe":
             self.process_swipe(int(task["deck"]))
+        elif task.get("type") == "clip":  # ancienne tâche des ralentis en base (V9), remplacée par rlpi.web.clips
+            log("tâche clip ignorée (ralentis désormais faits par l'API)", match=task.get("match"))
         else:
             self.bury("inconnue", None, raw, f"type de tâche inconnu : {task.get('type')!r}")
 

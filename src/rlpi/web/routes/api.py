@@ -251,7 +251,7 @@ def match_detail(games, reference: dict, player: str, g) -> dict:
         404: {"description": "Partie inconnue (ou pas la sienne), touche inconnue, ou replay non conservé"},
         422: {"description": "Touche impossible à retrouver dans le replay, ou trop près de son début ou de sa fin"},
     },
-    summary="Clip 3D d'une touche (3 s avant, 1 s après, 30 images/s), découpé dans le replay",
+    summary="Clip 3D d'une touche (4 s avant, 2 s après, 30 images/s), découpé dans le replay",
     description="Le replay brut est lu au premier clic sur un match (moins d'une seconde) ; les clips suivants du "
     "même match et les clips déjà vus sont servis depuis la mémoire.",
 )

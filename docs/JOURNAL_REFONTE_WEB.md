@@ -836,3 +836,26 @@ Branche `feature/amelioration-logicielle`, enchaînée sans pause avec G et I (L
   `test_cameras_dans_un_processus_separe` (vrai replay de `data/raw/` comparé à la lecture directe, replay abîmé
   → erreur sans fichier), `test_clip_service_sans_cameras` ; `synthetic_replay` refuse toute lecture des caméras
   côté web. pytest 143 réussis (Postgres compris) ; ruff OK.
+
+## 2026-11-21 — Revoir une action : fusion de `main` (ralentis de Théo)
+
+- Théo a poussé sur `main` (`7566163`) sa propre version de « ▶ Revoir » : ralentis fabriqués par le worker
+  (tâche Redis `clip`), gardés en base (table `clips`, migration V9), API `POST /api/clips` + interrogation,
+  `Ralenti.vue` / `ClipPlayer.vue`, 4 s avant et 2 s après la touche. Décidé avec Luc : **on garde la version de
+  cette branche** (découpe par l'API, vue joueur, onglet Matchs) **avec la fenêtre de Théo**.
+- Fusion de `main` : `routes/clips.py`, `Ralenti.vue`, `ClipPlayer.vue`, la tâche `clip` du worker et le champ
+  `match` des touches retirés. Deux doublons laissés par la fusion automatique corrigés (`"i"` deux fois dans
+  `touch_rows`, champ `i` deux fois dans le schéma `Touch`). Une tâche `clip` encore en file est ignorée avec un
+  message (pas de lettre morte).
+- **Migration `V10__suppression_clips.sql`** : supprime la table `clips` (V9 a pu être appliquée en production ;
+  Flyway interdit de retirer V9). Elle ne contenait que des ralentis recalculables. `SCHEMA_VERSION` = 10.
+- **Fenêtre des clips « Revoir » : 4 s avant, 2 s après** (`rlpi.web.clips.BEFORE_S` / `AFTER_S`) ;
+  `rlpi.web.clips.VERSION` 2 → 3 (ETag). Le Swipe garde 3 s / 1 s.
+- **Défaut corrigé dans `clips.resample`** (révélé par la fenêtre de 4 s : balle de l'engagement dessinée à
+  1 800 uu de sa place) : un objet sans mise à jour pendant plus de 0,25 s (balle avant l'engagement, voiture
+  démolie, après un but) était interpolé sur tout le trou avec une vitesse périmée. Il est maintenant tenu
+  immobile, vitesse nulle, jusqu'à sa mise à jour suivante. Effet sur le Swipe (5 replays de `data/raw/`,
+  3 s / 1 s) : 181 cartes sur 930 changent, écart maximal 5 764 uu, c'est-à-dire le même défaut dans les cartes
+  existantes. Les paquets déjà jugés ne sont pas recalculés. Test : `test_resample_objet_immobile_tenu_sans_vitesse_perimee`.
+- `clips.py`, `test_clips.py`, `test_web.py` remis en forme (la CI de Théo vérifie maintenant `clips.py`).
+- pytest 144 réussis (Postgres compris) ; ruff, ruff format, pyright 0 ; vue-tsc 0 ; vitest 31.

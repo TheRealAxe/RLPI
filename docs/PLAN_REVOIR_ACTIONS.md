@@ -1,8 +1,9 @@
 # Plan : revoir une action en 3D (onglets « Matchs » et « À travailler »)
 
 Objectif : à côté de chaque touche listée (actions qui coûtent d'un match, ralentis et touches suivantes de
-« À travailler »), un bouton **« ▶ Revoir »** ouvre un petit lecteur 3D isométrique : 3 s avant la touche, 1 s
-après, à 30 images/s, avec la voiture du joueur mise en avant.
+« À travailler »), un bouton **« ▶ Revoir »** ouvre un petit lecteur 3D isométrique : 4 s avant la touche, 2 s
+après (fenêtre reprise de la version de Théo, voir le journal du 2026-11-21), à 30 images/s, avec la voiture du
+joueur mise en avant.
 
 Décidé le 2026-11-20 avec Luc :
 

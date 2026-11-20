@@ -945,3 +945,23 @@ Ce qui change pour le travail sur les modèles et les indicateurs :
   `rlpi.bestplay`, `rlpi.mechanics`), hors du site.
 - L'instantané `tests/test_snapshot.py` garde les chiffres : un changement voulu d'indicateur se fait avec
   `--update-snapshot` et une ligne dans ce journal.
+
+## 2026-11-21 — Ralentis des touches les plus coûteuses (« Revoir » dans « À travailler »)
+
+Demande de Théo : pouvoir rejouer dans le player 3D les touches qui ont généré le moins de valeur, pour chaque
+utilisateur. Pas de nouveau modèle : on relie ce qui existait (pires touches de `dashboard/value.py`, lecteur du
+swipe, découpe `swipe.extract`). Pas de fantôme.
+- Migration `V9__clips.sql` : table `clips` (partie, joueur, image de la touche, statut, ralenti en jsonb).
+  `store.SCHEMA_VERSION` = 9.
+- `rlpi.clips` + worker (tâche `{"type": "clip", "match", "player"}`) : télécharge la partie et son replay brut,
+  découpe le ralenti demandé (4 s avant, 2 s après, 30 i/s) et, au passage, les 10 touches les plus coûteuses du
+  joueur dans cette partie. Essai sur une vraie partie : 10 ralentis en 1,7 s, ~100 Ko chacun.
+- API `POST /api/clips` (ses parties seulement, contrôle d'origine) et `GET /api/clips/{partie}/{image}`.
+- Touches du tableau de bord : `match` (identifiant de la partie) et `i` (image). `aggregate.VERSION` = 2 : le
+  worker recalcule les agrégats de toutes les parties (rattrapage horaire) ; d'ici là, le bouton « Revoir » est
+  masqué sur les touches des anciens agrégats. Instantané mis à jour (`--update-snapshot`) : seuls `i` et `match`
+  sont ajoutés aux touches, aucun chiffre ne change.
+- Interface : bouton « ▶ Revoir » sur les fiches et les lignes de « Les actions qui coûtent » ; fenêtre avec le
+  lecteur du swipe sans vote (`ClipPlayer.vue`), touche marquée sur la barre de temps, ×0,5 par défaut, Échap pour
+  fermer ; « environ 30 s la première fois » pendant la préparation.
+- `clips.py` ajouté aux vérifications ruff format et pyright de la CI.

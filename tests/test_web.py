@@ -675,8 +675,14 @@ def clip_storage(meta: dict, touches: list[dict], replay: bytes | None = b"repla
 
 # Caméras relevées dans le replay fictif (10 s à 120 images/s, temps = index / 120) : le joueur connecté passe en
 # caméra voiture à 4,9 s, soit 0,1 s avant la touche i = 50 (image 600 = 5 s).
-SYNTH_CAMS = {"players": {ME: {"settings": {"fov": 105.0, "distance": 250.0, "height": 90.0, "angle": -4.0,
-                                            "stiffness": 0.4}, "ball_cam": [[0.0, 1], [4.9, 0]]}}}
+SYNTH_CAMS = {
+    "players": {
+        ME: {
+            "settings": {"fov": 105.0, "distance": 250.0, "height": 90.0, "angle": -4.0, "stiffness": 0.4},
+            "ball_cam": [[0.0, 1], [4.9, 0]],
+        }
+    }
+}
 
 
 @pytest.fixture
@@ -715,8 +721,8 @@ def test_clip_service_partie_fictive(synthetic_replay):
     svc = wclips.ClipService(s3=clip_storage(meta, touches), bucket="b")
     body = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, 50, ME)))
     schemas.Clip.model_validate(body)
-    assert body["id"] == f"{CLIP_MATCH}:50" and body["fps"] == 30 and body["action_frame"] == 90
-    assert body["ball"][90] == [6000, 500, 93]  # calage dans le repère du terrain
+    assert body["id"] == f"{CLIP_MATCH}:50" and body["fps"] == 30 and body["action_frame"] == 120
+    assert body["ball"][120] == [6000, 500, 93]  # calage dans le repère du terrain
     assert judged(body) == [k == 4 for k in range(6)]  # deux touches dans l'image : celle du joueur connecté
     other = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, 50, "Steam:0")))
     assert judged(other) == [k == 0 for k in range(6)]
@@ -725,7 +731,7 @@ def test_clip_service_partie_fictive(synthetic_replay):
     assert svc.replay_reads == 1  # la dernière partie lue reste en mémoire
     cam = body["cam"]  # caméra du joueur connecté : réglages relevés, caméra voiture 0,1 s avant la touche
     assert cam["fov"] == 105.0 and cam["known"] is True and len(cam["ball_cam"]) == len(body["ball"])
-    assert cam["ball_cam"][86] == 1 and cam["ball_cam"][88] == 0 and cam["ball_cam"][90] == 0
+    assert cam["ball_cam"][116] == 1 and cam["ball_cam"][118] == 0 and cam["ball_cam"][120] == 0
     assert other["cam"] is None  # pas de caméra relevée pour ce joueur
     for i, status in ((70, 422), (98, 422), (51, 404)):
         with pytest.raises(wclips.ClipError) as e:

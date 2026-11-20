@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Fenêtre « Revoir » : une touche rejouée en 3D (3 s avant, 1 s après, 30 images/s), par le lecteur du Swipe
+// Fenêtre « Revoir » : une touche rejouée en 3D (4 s avant, 2 s après, 30 images/s), par le lecteur du Swipe
 // (swipe/player.ts). Fenêtre modale native (<dialog>) : focus gardé dedans, fermée par Échap, un clic à côté ou
 // le bouton ; le focus revient au bouton qui l'a ouverte. Pas de lecture automatique si l'utilisateur demande
 // moins d'animations (prefers-reduced-motion) : le clip s'ouvre alors arrêté sur la touche.

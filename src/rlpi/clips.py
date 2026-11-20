@@ -14,6 +14,7 @@ Cette lecture est lourde (1,5 à 3 s, environ 250 Mo) : le worker l'écrit une f
 
 Pas de dépendance au modèle ni à ballchasing : ce module est importable par l'API.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,11 +22,12 @@ from pathlib import Path
 
 import numpy as np
 
-SRC_FPS = 120       # lecture fine du replay pour dater chaque vraie mise à jour
-FRAMES_FPS = 10     # fréquence des images stockées (frames/<source>/<replay>.parquet) et de l'index `i` des touches
-FPS = 30            # images par seconde du clip livré
+SRC_FPS = 120  # lecture fine du replay pour dater chaque vraie mise à jour
+FRAMES_FPS = 10  # fréquence des images stockées (frames/<source>/<replay>.parquet) et de l'index `i` des touches
+FPS = 30  # images par seconde du clip livré
 BEFORE, AFTER = 3.0, 1.0
-MAX_GAP = 50.0      # écart maximal (uu) entre la balle notée et la balle du replay pour accepter le calage
+FROZEN_S = 0.25  # resample : au-delà, un objet sans mise à jour est tenu immobile (voitures : ~15 mises à jour/s)
+MAX_GAP = 50.0  # écart maximal (uu) entre la balle notée et la balle du replay pour accepter le calage
 TIME_HEADER = "current time"
 CAM_KEYS = ("fov", "distance", "height", "angle", "stiffness")
 
@@ -64,7 +66,8 @@ def read_replay(path: str | Path, fps: int = SRC_FPS) -> Track:
     import subtr_actor as sa
 
     cols, arr = sa.get_ndarray_with_info_from_replay_filepath(
-        str(path), ["BallRigidBody", "CurrentTime"], ["PlayerRigidBodyBasis", "PlayerBoost"], fps=fps, dtype="f32")
+        str(path), ["BallRigidBody", "CurrentTime"], ["PlayerRigidBodyBasis", "PlayerBoost"], fps=fps, dtype="f32"
+    )
     h = cols["column_headers"]
     return Track(np.asarray(arr), list(h["global_headers"]), list(h["player_headers"]), fps)
 
@@ -91,7 +94,9 @@ def read_cameras(path: str | Path) -> dict:
         cs = p.get("camera_settings") or {}
         ok = all(isinstance(cs.get(k), int | float) for k in CAM_KEYS)
         players[_pid(p.get("remote_id"))] = {
-            "settings": {k: round(float(cs[k]), 3) for k in CAM_KEYS} if ok else None, "ball_cam": []}
+            "settings": {k: round(float(cs[k]), 3) for k in CAM_KEYS} if ok else None,
+            "ball_cam": [],
+        }
     for rid, events in d.get("player_camera_events") or []:
         entry = players.setdefault(_pid(rid), {"settings": None, "ball_cam": []})
         last = None
@@ -125,8 +130,9 @@ def world_xy(x: float, y: float, team: int) -> tuple[float, float]:
     return s * x, s * y
 
 
-def locate(track: Track, i10: int, ball_xy: tuple[float, float], window: float = 1.0,
-           max_gap: float = MAX_GAP) -> int | None:
+def locate(
+    track: Track, i10: int, ball_xy: tuple[float, float], window: float = 1.0, max_gap: float = MAX_GAP
+) -> int | None:
     """Index (à `track.fps`) de la touche `i10` (à 10 images/s) : image où la balle est la plus proche de sa
     position notée `ball_xy` (repère du terrain), à ± `window` secondes. None si l'écart dépasse `max_gap`."""
     r = track.fps // FRAMES_FPS
@@ -144,21 +150,44 @@ def locate(track: Track, i10: int, ball_xy: tuple[float, float], window: float =
 def resample(pos: np.ndarray, vel: np.ndarray, src_fps: int, out_n: int, out_fps: int) -> tuple[np.ndarray, np.ndarray]:
     """Les voitures ne sont mises à jour qu'environ 15 fois par seconde dans le replay : entre deux mises à jour,
     la position reste figée puis saute. On garde les vraies mises à jour (position qui change) et on
-    reconstruit une trajectoire continue entre elles (Hermite cubique avec les vitesses enregistrées)."""
-    keys = [0] + [k for k in range(1, len(pos)) if np.any(pos[k] != pos[k - 1])]
+    reconstruit une trajectoire continue entre elles (Hermite cubique avec les vitesses enregistrées).
+
+    Objet immobile plus de `FROZEN_S` (balle avant l'engagement, après un but…) : la vitesse enregistrée est
+    périmée ; on le tient immobile jusqu'à l'image qui précède sa prochaine mise à jour (et à la fin du segment),
+    au lieu d'interpoler sur tout le trou avec cette vitesse."""
+    upd = [0] + [k for k in range(1, len(pos)) if np.any(pos[k] != pos[k - 1])] + [len(pos)]
+    gap = max(2, int(FROZEN_S * src_fps))
+    keys, still = [], []  # still : vitesse mise à 0 sur cette clé
+    for a, b in zip(upd, upd[1:]):
+        frozen = b - a > gap
+        keys.append(a)
+        still.append(frozen)
+        if frozen:
+            keys.append(b - 1)
+            still.append(True)
     kt = np.array(keys) / src_fps
-    kp, kv = pos[keys], vel[keys]
+    kp, kv = pos[keys], vel[keys].copy()
+    kv[np.array(still)] = 0
     out_t = np.arange(out_n) / out_fps
     P, Vv = np.zeros((out_n, 3)), np.zeros((out_n, 3))
     for n, t in enumerate(out_t):
         j = int(np.searchsorted(kt, t, side="right") - 1)
         if j < 0:
-            P[n], Vv[n] = kp[0], kv[0]; continue
+            P[n], Vv[n] = kp[0], kv[0]
+            continue
         if j >= len(kt) - 1:
-            dt = t - kt[-1]; P[n], Vv[n] = kp[-1] + kv[-1] * dt, kv[-1]; continue
-        h = kt[j + 1] - kt[j]; u = (t - kt[j]) / h
+            dt = t - kt[-1]
+            P[n], Vv[n] = kp[-1] + kv[-1] * dt, kv[-1]
+            continue
+        h = kt[j + 1] - kt[j]
+        u = (t - kt[j]) / h
         u2, u3 = u * u, u * u * u
-        P[n] = (2 * u3 - 3 * u2 + 1) * kp[j] + (u3 - 2 * u2 + u) * h * kv[j] + (-2 * u3 + 3 * u2) * kp[j + 1] + (u3 - u2) * h * kv[j + 1]
+        P[n] = (
+            (2 * u3 - 3 * u2 + 1) * kp[j]
+            + (u3 - 2 * u2 + u) * h * kv[j]
+            + (-2 * u3 + 3 * u2) * kp[j + 1]
+            + (u3 - u2) * h * kv[j + 1]
+        )
         Vv[n] = kv[j] + (kv[j + 1] - kv[j]) * u
     return P, Vv
 
@@ -171,8 +200,10 @@ def resample_dir(vec: np.ndarray, pos: np.ndarray, src_fps: int, out_n: int, out
     for n, t in enumerate(np.arange(out_n) / out_fps):
         j = int(np.clip(np.searchsorted(kt, t, side="right") - 1, 0, len(kt) - 1))
         if j >= len(kt) - 1:
-            out[n] = kv[-1]; continue
-        u = (t - kt[j]) / (kt[j + 1] - kt[j]); v = kv[j] + (kv[j + 1] - kv[j]) * u
+            out[n] = kv[-1]
+            continue
+        u = (t - kt[j]) / (kt[j + 1] - kt[j])
+        v = kv[j] + (kv[j + 1] - kv[j]) * u
         out[n] = v / (np.linalg.norm(v) or 1)
     return out
 
@@ -181,8 +212,16 @@ def _r(x: np.ndarray) -> list:
     return np.round(x).astype(int).tolist()
 
 
-def cut(track: Track, meta: dict, j: int, judged_id: str, before: float = BEFORE, after: float = AFTER,
-        fps: int = FPS, cams: dict | None = None) -> dict | None:
+def cut(
+    track: Track,
+    meta: dict,
+    j: int,
+    judged_id: str,
+    before: float = BEFORE,
+    after: float = AFTER,
+    fps: int = FPS,
+    cams: dict | None = None,
+) -> dict | None:
     """Clip `SwipeCard` (sans id, origine ni action) autour de l'image `j` : `before` s avant, `after` s après, à
     `fps` images/s. `meta` : meta.json de la partie (joueurs : slot, équipe, identifiant) ; `judged_id` : voiture
     mise en avant ; `cams` (lu par `read_cameras`) : ajoute `cam`, la caméra de la voiture mise en avant (None si
@@ -209,15 +248,26 @@ def cut(track: Track, meta: dict, j: int, judged_id: str, before: float = BEFORE
         fw = resample_dir(xyz(lambda c, k=k: track.car_col(k, f"forward {c}")), pos, src, n_out, fps)
         up = resample_dir(xyz(lambda c, k=k: track.car_col(k, f"up {c}")), pos, src, n_out, fps)
         boost = seg[:, track.car_col(k, track.boost_header)]
-        cars.append({
-            "team": p["team"], "judged": p["id"] == judged_id,
-            "pos": _r(P), "vel": _r(V), "fw": np.round(fw, 3).tolist(), "up": np.round(up, 3).tolist(),
-            "boost": np.round(boost[::step][:n_out] / 2.55).astype(int).tolist(),
-        })
+        cars.append(
+            {
+                "team": p["team"],
+                "judged": p["id"] == judged_id,
+                "pos": _r(P),
+                "vel": _r(V),
+                "fw": np.round(fw, 3).tolist(),
+                "up": np.round(up, 3).tolist(),
+                "boost": np.round(boost[::step][:n_out] / 2.55).astype(int).tolist(),
+            }
+        )
     if not any(c["judged"] for c in cars):
         return None
-    bp, bv = resample(xyz(lambda c: track.ball_col(f"position {c}")),
-                      xyz(lambda c: track.ball_col(f"linear velocity {c}")), src, n_out, fps)
+    bp, bv = resample(
+        xyz(lambda c: track.ball_col(f"position {c}")),
+        xyz(lambda c: track.ball_col(f"linear velocity {c}")),
+        src,
+        n_out,
+        fps,
+    )
     card = {"fps": fps, "action_frame": int(before * fps), "ball": _r(bp), "ball_v": _r(bv), "cars": cars}
     if cams is not None:
         card["cam"] = cam_for(cams, judged_id, track.times()[j0:j1][::step][:n_out])
