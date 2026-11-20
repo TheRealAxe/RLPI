@@ -436,6 +436,7 @@ class Tech(Strict):
 class Touch(Strict):
     replay: str
     date: str
+    i: int = Field(description="Indice de l'image de la touche dans la partie (10 images/s) : clé pour la revoir")
     clock: Num
     action: str
     kind: str
@@ -464,11 +465,14 @@ class CurveGoal(Strict):
 
 class CurveTouch(Strict):
     k: int
+    i: int = Field(description="Indice de l'image de la touche dans la partie (10 images/s) : clé pour la revoir")
     a: str
     clock: Num
     dv: Num
     va: Num
     vb: Num
+    x: Num = Field(description="Position de la balle à la touche")
+    y: Num
 
 
 class Curve(Strict):
@@ -612,6 +616,43 @@ class Match(Strict):
     indices: list[PerfMatch] = Field(description="Indice de performance du joueur dans ce match (0 ou 1 ligne)")
     pires: list[Touch] = Field(description="Ses touches les plus coûteuses dans ce match")
     meilleures: list[Touch]
+
+
+# ------------------------------------------------------------------------------------------------ clips 3D
+
+
+class ClipCar(Strict):
+    team: int
+    judged: bool = Field(description="Voiture mise en avant : l'auteur de la touche")
+    pos: list[list[int]] = Field(description="Position (x, y, z) à chaque image, en unités du jeu")
+    vel: list[list[int]] = Field(description="Vitesse (x, y, z) à chaque image")
+    fw: list[list[float]] = Field(description="Vecteur unitaire vers l'avant de la voiture")
+    up: list[list[float]] = Field(description="Vecteur unitaire vers le haut de la voiture")
+    boost: list[int] = Field(description="Boost (0 à 100)")
+
+
+class ClipCam(Strict):
+    """Caméra du joueur mis en avant, relevée dans le replay (vue joueur du lecteur)."""
+
+    fov: float | None = Field(default=None, description="Champ de vision horizontal (degrés)")
+    distance: float | None = Field(default=None, description="Distance derrière la voiture (unités du jeu)")
+    height: float | None = Field(default=None, description="Hauteur au-dessus de la voiture (unités du jeu)")
+    angle: float | None = Field(default=None, description="Inclinaison (degrés, négatif : vers le bas)")
+    stiffness: float | None = Field(default=None, description="Raideur (0 : caméra souple, 1 : rigide)")
+    known: bool = Field(description="Réglages relevés dans le replay (sinon : réglages par défaut du lecteur)")
+    ball_cam: list[int] = Field(description="Caméra balle (1) ou caméra voiture (0) à chaque image")
+
+
+class Clip(Strict):
+    """Clip 3D d'une touche, au format des cartes du Swipe (lu par web/src/swipe/player.ts)."""
+
+    id: str = Field(description="« <partie>:<i> »")
+    fps: int = Field(description="Images par seconde (30)")
+    action_frame: int = Field(description="Image de la touche dans le clip")
+    ball: list[list[int]] = Field(description="Position de la balle à chaque image")
+    ball_v: list[list[int]] = Field(description="Vitesse de la balle à chaque image")
+    cars: list[ClipCar]
+    cam: ClipCam | None = Field(default=None, description="Caméra du joueur mis en avant, si relevée")
 
 
 # ------------------------------------------------------------------------------------------------ modèles

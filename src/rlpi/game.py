@@ -4,7 +4,7 @@ Chaque partie est traitée seule, dans un dossier autonome, avec les modèles d�
 
     python -m rlpi.game run <fichier.replay> --out <dossier_partie>
 
-    <dossier_partie>/frames/partie/<replay>.parquet, .touches.parquet, .meta.json
+    <dossier_partie>/frames/partie/<replay>.parquet, .touches.parquet, .meta.json, .cameras.json
     <dossier_partie>/features/<table>_partie.parquet   (+ value_curves_partie.json, bestplay_X_partie.npy)
     <dossier_partie>/result.json                       statut, durée de chaque étape, erreurs
 
@@ -63,11 +63,35 @@ def run(replay: str | Path, out: str | Path, models: str | Path | None = None, t
     return res
 
 
+def cameras(replay: str | Path, dest: str | Path, timeout: float = 300) -> None:
+    """Caméras des joueurs (`clips.read_cameras`) écrites dans `dest`, lues dans un processus séparé : la lecture
+    prend environ 250 Mo, rendus au système à la fin. Pour le rattrapage des parties traitées avant le
+    `cameras.json` (python -m rlpi.worker backfill-cameras). RuntimeError si la lecture échoue."""
+    dest = Path(dest).resolve()
+    src = Path(__file__).resolve().parents[1]
+    env = os.environ | {"PYTHONIOENCODING": "utf-8"}
+    env["PYTHONPATH"] = os.pathsep.join([str(src), env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+    p = subprocess.run([sys.executable, "-m", "rlpi.game", "_cameras", str(Path(replay).resolve()), str(dest)],
+                       env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    if p.returncode != 0 or not dest.exists():
+        dest.unlink(missing_ok=True)
+        raise RuntimeError((p.stderr or p.stdout or f"code {p.returncode}").strip()[-500:])
+
+
+def _cameras(replay: str, dest: str) -> None:
+    from rlpi import clips
+
+    cams = clips.read_cameras(replay)
+    tmp = Path(dest).with_suffix(".tmp")
+    tmp.write_text(json.dumps(cams), encoding="utf-8")
+    tmp.replace(dest)
+
+
 def _steps(replay: str) -> None:
     """Exécuté dans le processus fils : RLPI_DATA, RLPI_MODELS et RLPI_SOURCE sont déjà réglés."""
     import polars as pl
 
-    from rlpi import bestplay, decisions, defense, frames, kickoffs, passes, perf, stats, value
+    from rlpi import bestplay, clips, decisions, defense, frames, kickoffs, passes, perf, stats, value
     from rlpi.config import DATA, FEATURES, FRAMES, SOURCE
 
     assert SOURCE == GAME_SOURCE, "lancer via rlpi.game run"
@@ -111,6 +135,16 @@ def _steps(replay: str) -> None:
         if not df.is_empty():
             df.write_parquet(FEATURES / f"player_match_stats_{SOURCE}.parquet")
     step("stats", do_stats)
+
+    # Caméras des joueurs (vue joueur du bouton « ▶ Revoir ») : lecture lourde, faite une fois ici. Facultatif :
+    # un échec est noté en avertissement sans rendre la partie « partiel » (le clip part alors sans caméra).
+    t = time.time()
+    try:
+        cams = clips.read_cameras(replay)
+        (FRAMES / SOURCE / f"{info['replay']}.cameras.json").write_text(json.dumps(cams), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        res.setdefault("warnings", {})["cameras"] = f"{type(e).__name__}: {e}"[:500]
+    res["steps"]["cameras"] = round(time.time() - t, 2)
 
     step("valeur", lambda: value.touches(SOURCE, HORIZON))
     step("buts", lambda: value.goal_values(SOURCE, HORIZON))
@@ -237,9 +271,14 @@ def main() -> None:
     s.add_argument("--source", default=None, help="nom de la source (défaut : RLPI_SOURCE, sinon perso)")
     s = sub.add_parser("_steps")
     s.add_argument("replay")
+    s = sub.add_parser("_cameras")
+    s.add_argument("replay")
+    s.add_argument("dest")
     a = ap.parse_args()
     if a.cmd == "_steps":
         _steps(a.replay)
+    elif a.cmd == "_cameras":
+        _cameras(a.replay, a.dest)
     elif a.cmd == "run":
         r = run(a.replay, a.out, a.models)
         err = f" — erreurs : {', '.join(r['errors'])}" if r.get("errors") else ""

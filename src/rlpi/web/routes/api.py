@@ -17,14 +17,17 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from starlette.concurrency import run_in_threadpool
 
 from rlpi import account, events, store
-from rlpi.web import schemas
+from rlpi.web import clips, schemas
 from rlpi.web.cache import JsonCache, etag
 from rlpi.web.deps import CurrentPlayer, OwnPlayer, SameOrigin
 
 router = APIRouter(prefix="/api", tags=["api"])
 CACHE = JsonCache()
+CLIPS = clips.ClipService()
+CLIP_CACHE_CONTROL = "private, max-age=86400"  # un jour, puis revalidation par l'ETag
 DAY = r"^\d{4}-\d{2}-\d{2}$"
 ID_LIST = Annotated[str, Query(max_length=400, description="Identifiants séparés par des virgules")]
 NOT_READY = "Aucune partie prête pour ce joueur (import ou calcul en cours)."
@@ -36,10 +39,14 @@ JSON_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 
 
-def json_response(request: Request, gz: bytes, tag: str) -> Response:
+def not_modified(request: Request, tag: str) -> bool:
+    return tag in [t.strip() for t in request.headers.get("if-none-match", "").split(",")]
+
+
+def json_response(request: Request, gz: bytes, tag: str, cache_control: str = "private, no-cache") -> Response:
     """Réponse JSON compressée (envoyée telle quelle si le navigateur accepte gzip) avec son ETag."""
-    headers = {"ETag": tag, "Cache-Control": "private, no-cache", "Vary": "Accept-Encoding, Cookie"}
-    if tag in [t.strip() for t in request.headers.get("if-none-match", "").split(",")]:
+    headers = {"ETag": tag, "Cache-Control": cache_control, "Vary": "Accept-Encoding, Cookie"}
+    if not_modified(request, tag):
         return Response(status_code=304, headers=headers)
     if "gzip" in request.headers.get("accept-encoding", "").lower():
         return Response(gz, media_type="application/json", headers=headers | {"Content-Encoding": "gzip"})
@@ -234,6 +241,49 @@ def match_detail(games, reference: dict, player: str, g) -> dict:
         "pires": (val or {}).get("worst", []),
         "meilleures": (val or {}).get("best", []),
     }
+
+
+@router.get(
+    "/joueurs/{id}/matchs/{match}/clips/{i}",
+    response_model=schemas.Clip,
+    responses=JSON_RESPONSES
+    | {
+        404: {"description": "Partie inconnue (ou pas la sienne), touche inconnue, ou replay non conservé"},
+        422: {"description": "Touche impossible à retrouver dans le replay, ou trop près de son début ou de sa fin"},
+    },
+    summary="Clip 3D d'une touche (3 s avant, 1 s après, 30 images/s), découpé dans le replay",
+    description="Le replay brut est lu au premier clic sur un match (moins d'une seconde) ; les clips suivants du "
+    "même match et les clips déjà vus sont servis depuis la mémoire.",
+)
+async def clip(
+    request: Request,
+    player: OwnPlayer,
+    id: Annotated[str, Path(max_length=100)],
+    match: Annotated[str, Path(max_length=200)],
+    i: Annotated[int, Path(ge=0, le=100_000, description="Indice de l'image de la touche (10 images/s)")],
+) -> Response:
+    # Asynchrone : un clip déjà gardé est servi sans attendre, et les demandes qui attendent une place de lecture
+    # (ClipService.aclip) n'occupent pas de thread du serveur.
+    def game() -> tuple | None:
+        with store.db() as c:
+            return c.execute(
+                "SELECT m.replay_key, m.updated_at FROM match_players mp JOIN matches m ON m.id = mp.match_id "
+                "WHERE mp.match_id = %s AND mp.player_id = %s AND m.status IN ('ok', 'partiel')",
+                (match, player),
+            ).fetchone()
+
+    row = await run_in_threadpool(game)
+    if row is None:
+        raise HTTPException(404, "Partie inconnue, ou tu n'y as pas joué.")
+    replay_key, version = row[0] or f"replays/{match}.replay", row[1].isoformat()  # version : partie réanalysée
+    tag = clips.tag(match, version, i, player)
+    if not_modified(request, tag):
+        return json_response(request, b"", tag, CLIP_CACHE_CONTROL)
+    try:
+        gz = await CLIPS.aclip(match, replay_key, i, player, version)
+    except clips.ClipError as e:
+        raise HTTPException(e.status, e.message) from None
+    return json_response(request, gz, tag, CLIP_CACHE_CONTROL)
 
 
 # ------------------------------------------------------------------------------------------------ modèles

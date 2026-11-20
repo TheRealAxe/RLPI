@@ -24,6 +24,7 @@ export type SynergyPair = S["SynergyPair"];
 export type TechRow = S["TechRow"];
 export type Modeles = S["Modeles"];
 export type Actualisation = S["Actualisation"];
+export type Clip = S["Clip"];
 
 /** Erreur HTTP lisible : statut + message de l'API (`detail`) quand il existe. */
 export class ApiError extends Error {
@@ -71,4 +72,7 @@ export const api = {
   tableau: (id: string, q: URLSearchParams, signal?: AbortSignal) =>
     getJson<Tableau>(`${player(id)}/tableau${q.toString() ? "?" + q : ""}`, signal),
   modeles: (signal?: AbortSignal) => getJson<Modeles>("/api/modeles", signal),
+  /** Clip 3D d'une touche (passer par lib/clips.ts : loadClip). */
+  clip: (id: string, match: string, i: number, signal?: AbortSignal) =>
+    getJson<Clip>(`${player(id)}/matchs/${encodeURIComponent(match)}/clips/${i}`, signal),
 };

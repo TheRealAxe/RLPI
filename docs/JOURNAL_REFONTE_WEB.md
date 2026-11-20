@@ -667,3 +667,172 @@ Branche `feature/amelioration-logicielle`, enchaînée sans pause avec G et I (L
 - Tests : rattrapage avec lettre morte de la version courante, d'une version ancienne et sans version ; un calcul
   abandonné enregistre bien la version. ruff et pyright 0 ; tests Postgres non lancés en local (Docker arrêté),
   à vérifier par la CI.
+
+## 2026-11-20 — Revoir une action en 3D, étape 1 : découpe réutilisable (`docs/PLAN_REVOIR_ACTIONS.md`)
+
+- Nouveau module `rlpi.clips` (sans modèle ni ballchasing, importable par l'API) : `read_replay` (lecture unique
+  subtr-actor à 120 Hz), `locate` (instant de la touche à 120 Hz à partir de l'index à 10 Hz et de la balle en
+  x, y), `cut` (carte `SwipeCard`, 3 s avant / 1 s après, 30 images/s), plus `world_xy`. `resample` et
+  `resample_dir` y sont déplacés.
+- `rlpi.swipe.extract` n'est plus qu'une boucle `read_replay` → `locate` → `cut`.
+- **Calage en x, y seulement** : vérifié sur les 5 replays de `data/raw/` (passés par `rlpi.game run`) : sur
+  1 014 touches, même instant à 120 Hz qu'avec x, y, z dans 100 % des cas, aucune touche écartée.
+- **Swipe inchangé** : les 1 014 cartes produites avant et après le découpage sont identiques octet pour octet.
+- Lecture d'un replay à 120 Hz sur le poste de Luc : 0,25 à 0,32 s, tableau de 18 à 23 Mo.
+- **À savoir pour l'étape 3** : dans `touch_values` (et donc `x`, `y` du tableau de bord), la position de la balle
+  est dans le repère de l'équipe du toucheur (équipe 1 : x et y inversés). L'API devra la repasser dans le repère
+  du terrain (`clips.world_xy`) avant `locate`.
+- Tests : `tests/test_clips.py` (partie fictive : calage, seuil, fenêtre, bornes du clip, voiture absente, balle
+  manquante ; vrai replay de `data/raw/`, sauté s'il n'y en a pas : toutes les touches calées, balle du clip au
+  moment de la touche cohérente avec les images à 10 Hz, `swipe.extract` passe par `clips`). ruff et pyright 0 ;
+  pytest 82 réussis (tests Postgres sautés en local).
+
+## 2026-11-20 — Revoir une action en 3D, étape 2 : index de la touche dans le tableau de bord
+
+- `dashboard/value.py` : les pires et meilleures touches (`touch_rows`) portent `i` (index d'image à 10 Hz) ;
+  les touches de la courbe d'un match portent `i`, `x`, `y` (position de la balle, repère de l'équipe du
+  toucheur, comme dans `touch_values`).
+- Schémas `Touch` et `CurveTouch` (`web/schemas.py`) : `i` obligatoire, `x`, `y` ajoutés à `CurveTouch` ;
+  `schema.d.ts` régénéré.
+- **`aggregate.VERSION` passe à 2** : le worker recalcule toutes les parties au rattrapage. `load_games` ne lit que
+  les agrégats de la version courante : pendant le rattrapage, les parties pas encore recalculées ne s'affichent
+  pas (compteur « en préparation »), mais toutes celles qui s'affichent ont `i`. D'où `i` obligatoire, et pas
+  besoin de masquer le bouton « Revoir » faute d'`i` à l'étape 4.
+- Instantané du tableau de bord mis à jour, différence vérifiée : seuls apparaissent `i` (869 fois), `x` et `y`
+  (794 touches de courbe).
+- `tests/test_clips.py` (étape 1) remis en forme : il faisait échouer la vérification de format de la CI.
+- ruff et pyright 0 ; pytest 82 réussis (tests Postgres sautés en local) ; vue-tsc 0, vitest 21 réussis.
+
+## 2026-11-20 — Revoir une action en 3D, étape 3 : l'appel API `clips`
+
+- `GET /api/joueurs/{id}/matchs/{partie}/clips/{i}` (`web/routes/api.py`) : session et `OwnPlayer` ; la partie
+  doit être une des siennes (requête directe sur `match_players`, statut `ok` ou `partiel`), sinon 404. Le
+  replay est cherché à la clé `matches.replay_key` (`replays/<partie>.replay` à défaut). Côté interface,
+  l'identifiant de partie est le `replay` des touches : c'est le même que l'identifiant du match (le worker
+  analyse le fichier `<partie>.replay`).
+- Nouveau module `rlpi.web.clips` (`ClipService`) : télécharge d'abord `meta.json` et `touch_values` (quelques Ko),
+  cherche la touche `i` (inconnue → 404 sans télécharger le replay), puis le replay, `read_replay` → `locate` →
+  `cut`. La position de la balle de `touch_values` est repassée dans le repère du terrain (`clips.world_xy`).
+- **Deux touches dans la même image à 10 Hz** (deux joueurs) : on prend celle du joueur connecté, sinon la
+  première. L'auteur de la touche est la voiture mise en avant (un coéquipier affiché par le filtre « joueur »
+  est donc bien mis en avant sur ses propres touches).
+- Protection : route synchrone (pool de threads) ; au plus 2 lectures de partie en même temps (sémaphore) ;
+  verrou par partie (deux clics simultanés sur le même match = une lecture) ; dernière partie lue gardée en
+  mémoire ; clips gardés en gzip dans un LRU de 300 entrées (environ 6 Mo).
+- ETag `"clip-…"` (partie, `i`, `rlpi.web.clips.VERSION`), indépendant de l'empreinte du code ; `Cache-Control:
+  private, max-age=86400` puis revalidation (pas `immutable` : l'URL ne change pas si la découpe change).
+- Erreurs : 404 « Replay non conservé pour cette partie. », 404 « Touche inconnue dans cette partie. », 404
+  « Données de la partie introuvables dans le stockage. », 422 « Impossible de retrouver cette touche dans le
+  replay. », 422 « Touche trop près du début ou de la fin du replay pour en faire un clip. ».
+- Schéma `Clip` (`web/schemas.py`, format `SwipeCard` plus `id` = `<partie>:<i>`) ; `schema.d.ts` régénéré.
+- `subtr-actor-py==1.5.1` ajouté à l'extra `server`, `uv.lock` à jour. Image du serveur reconstruite : 1,23 →
+  1,24 Go. Dans le conteneur : lecture d'un replay 0,20 à 0,26 s (5 replays de `data/raw/`), pic mémoire
+  +58 Mo pour une lecture (89 Mo contre 31 Mo) ; avec 2 lectures simultanées et la dernière partie gardée
+  (environ 20 Mo), compter environ 150 Mo de plus pour l'API au pire.
+- Mesure locale du service sur un vrai replay (1,7 Mo, 198 touches) : 198 clips sur 198, premier clic 0,45 s
+  (téléchargement compris), clics suivants sur le même match 92 ms en médiane (174 ms au plus) ; clip de 20 Ko
+  en gzip (57 Ko brut).
+- Tests (`tests/test_web.py`) : service sur la partie fictive de `test_clips` (calage dans le repère du terrain,
+  touche du joueur connecté préférée, auteur mis en avant, dernière partie gardée, 404 / 422), stockage
+  incomplet (replay absent, touche inconnue sans lecture du replay, partie absente), vrai replay de `data/raw/`
+  (sauté s'il n'y en a pas), route : 401, 403, 404 (pas sa partie, partie inconnue, touche inconnue, replay
+  supprimé), 422, 200 en gzip, 304 sur l'ETag, clic suivant servi sans relire le replay.
+- ruff et pyright 0 ; pytest 135 réussis avec Postgres local (`docker-compose.dev.yml`) ; vue-tsc 0.
+- **Tests Postgres sous Windows** : `RLPI_TEST_DATABASE_URL` doit viser `127.0.0.1` et pas `localhost`. Avec
+  `localhost`, la connexion à la base de test toute neuve reste bloquée sans erreur (Docker n'écoute que sur
+  `127.0.0.1`, `localhost` est d'abord résolu en `::1`).
+
+## 2026-11-20 — Revoir une action en 3D, étape 4 : le lecteur dans l'interface
+
+- `web/src/lib/clips.ts` : `loadClip(partie, i) → Promise<SwipeCard>`, seul endroit qui sait d'où vient le clip
+  (l'API, route de l'étape 3, joueur connecté). Garde les 40 derniers clips demandés en mémoire (un échec n'est
+  pas gardé : le clic suivant réessaie). Messages en français : celui de l'API pour les 404 / 422 (« Replay non
+  conservé pour cette partie. »…), sinon session expirée, clip pas préparé ou serveur muet.
+- `web/src/components/ActionReplay.vue` : une seule fenêtre pour toute l'application (montée dans `App.vue`,
+  état partagé `lib/replay.ts`, comme le panneau Méthode). `<dialog>` natif en modal : focus gardé dedans, Échap,
+  clic à côté ou « Fermer » ; le focus revient au bouton « Revoir » après la fermeture. Lecteur
+  `swipe/player.ts` sans modification : lecture / pause, recommencer, ×1 / ×0,5 / ×0,25, barre de temps avec le
+  repère jaune de la touche, rotation, vue de dessus ; en-tête « Dégagement · 2:31 · situation −0,30 → −0,60 »
+  et date ; ligne « Reconstitution 3D à partir du replay, pas une vidéo du jeu ». États chargement (avec « le
+  premier clip d'un match prend environ une seconde ») et erreur (message de l'API, « Réessayer »).
+  `prefers-reduced-motion` : pas de lecture automatique, le clip s'ouvre arrêté sur la touche.
+  Plein écran sous 720 px, boutons d'au moins 40 px.
+- `web/src/components/ReplayButton.vue` (« ▶ Revoir ») : À travailler (3 fiches, à côté de « Ouvrir le match »,
+  et chaque ligne des suivantes : la ligne n'est plus un seul bouton, le bouton « Revoir » est à côté) ; Matchs
+  (chaque ligne de « Les actions qui coûtent »). Absent sans partie, sans indice d'image ou sans joueur connecté.
+- Contrôles du lecteur : styles communs à la carte du Swipe et à la fenêtre (`app.css`). Retrait d'un
+  `cursor: pointer` resté sur les lignes de « Les actions qui coûtent » (elles n'étaient pas cliquables).
+- Textes dans `copy/index.ts` (`REVOIR`, `replayTitle`, `replayLabel`) ; rubrique « Revoir une touche en 3D » dans
+  le panneau Méthode (`copy/glossary.ts`).
+- Tests vitest : `lib/clips.test.ts` (adresse appelée, mémoire, messages d'erreur, réessai après échec),
+  `components/ReplayButton.test.ts` (affichage conditionnel, ouverture sur la bonne touche sans déclencher la
+  ligne, titre). vue-tsc 0 ; vitest 31 réussis ; construction OK.
+- Vérifié à la main (`docker-compose.dev.yml`, agrégats recalculés en version 2 par `rebuild-aggregates --here`,
+  55 parties en 11 s) : À travailler et Matchs, premier clip 1,1 s (relecture du replay comprise), clip suivant
+  du même match ≈ 0,95 s mesuré dans le navigateur ; partie sans replay → « Replay non conservé pour cette
+  partie. » ; Échap, clic à côté, retour du focus ; mobile 390 px avec `prefers-reduced-motion`.
+- Remarqué au passage, non corrigé (hors périmètre) : sur mobile (390 px), le bandeau du résultat de l'onglet
+  Matchs (`.resultbar`) dépasse de 16 px à droite et fait défiler la page en largeur.
+
+## 2026-11-20 — Revoir une action : vue joueur
+
+- Demande de Théo : voir la touche depuis la caméra du joueur. Le replay contient, pour chaque joueur, ses
+  réglages caméra (FOV, distance, hauteur, angle, raideur) et chaque bascule caméra balle / caméra voiture
+  (`subtr_actor.get_replay_frames_data`, subtr-actor-py 1.5.1 : `meta.team_*[].camera_settings` et
+  `player_camera_events`). Le swivel (stick droit) n'est presque pas enregistré (yaw/pitch caméra à 128 sur
+  99,5 % des images d'un replay testé) : il n'est pas relevé.
+- Cette lecture est lourde (1,5 à 3 s, environ 260 Mo en Python) : `rlpi.clips.read_cameras` est appelée une fois
+  par le worker (nouvelle étape `cameras` de `rlpi.game`, fichier `frames/partie/<replay>.cameras.json`, environ
+  9 Ko, envoyé sur Garage avec le reste). Pour les parties analysées avant, l'API la fait une fois au premier clip
+  puis dépose le fichier ; en cas d'échec, le clip part sans caméra.
+- Clip : champ `cam` (réglages, `known`, caméra balle 0/1 à chaque image), calé sur le temps du replay (colonne
+  `CurrentTime` ajoutée à `read_replay`). Version des clips 1 → 2 (ETag). Cartes du Swipe inchangées.
+- Lecteur (`swipe/player.ts`) : mode `pov` en perspective. Caméra derrière l'auteur à `distance`/`height`, tournée
+  vers la balle (inclinaison bornée) ou dans l'axe de la voiture (`angle`), suivi lissé selon la raideur ; FOV
+  horizontal en 16:9, champ vertical gardé sur les autres formats. Coupure au plan proche des polygones et
+  segments, faces des voitures cachées selon la position de la caméra, voitures à taille réelle, murs voilés.
+  Réglages par défaut du jeu (110 / 270 / 100 / −3 / 0,5) quand la caméra n'est pas relevée.
+- Fenêtre « Revoir » : bouton « Vue joueur » (choix gardé d'un clip à l'autre ; rotation et vue de dessus
+  désactivées dans ce mode), bandeau « caméra balle » / « caméra voiture », note sur l'origine des réglages.
+- Tests : `test_clips` (caméras dans la découpe, vrai replay), `test_web` (caméra dans le clip, calcul unique et
+  dépôt du `cameras.json`). pytest 88 réussis ; ruff OK ; vue-tsc 0 ; vitest 31. Rendu vérifié sur 3 touches
+  d'un vrai replay (caméra balle au sol, aérien en caméra voiture). L'erreur pyright de `game.py:62` existait déjà.
+
+## 2026-11-20 — Revoir une action : corrections après relecture
+
+- Étape `cameras` de `rlpi.game` : un échec n'est plus une erreur (la partie ne passe plus « partiel ») mais un
+  avertissement dans `result.json` (`warnings.cameras`) ; le clip part alors sans caméra.
+- Clips toujours à jour : l'ETag, le cache des clips et la partie gardée en mémoire portent la version de la
+  partie (`matches.updated_at`, changée à chaque traitement). Une partie réanalysée n'est plus servie périmée
+  (avant : jusqu'à 24 h côté navigateur, sans limite côté serveur).
+- L'ETag dépend aussi du joueur connecté (sa touche est préférée quand deux joueurs touchent la balle dans la même
+  image).
+- Tests : `test_clip_service_partie_reanalysee`, et `test_clip_api` vérifie le nouvel ETag après réanalyse. Tests
+  clips (Postgres compris) réussis ; ruff OK.
+
+## 2026-11-20 — Revoir une action : route asynchrone, verrous par clé
+
+- Route des clips en `async def` : un clip déjà gardé est servi sans attendre (`ClipService.aclip`) ; les autres
+  sont faits dans un thread, au plus `MAX_READS` = 2 à la fois (`anyio.CapacityLimiter`, qui remplace le
+  sémaphore). Les demandes en trop attendent leur tour sans occuper l'un des 40 threads du serveur, et un clip
+  gardé ne fait plus la queue derrière une lecture lente. La requête Postgres de la route passe dans un thread.
+- Verrous par clé (`cache.KeyedLocks`, utilisé par `JsonCache.compute` et par les parties de `ClipService`) : le
+  verrou n'est retiré que quand plus personne ne le tient ni ne l'attend. Avant, une demande arrivée pendant
+  qu'une autre attendait recevait un nouveau verrou et calculait en parallèle (cas d'un calcul qui échoue, donc
+  non gardé, avec trois demandes ou plus).
+- Tests (écrits d'abord, en échec avant le correctif) : `test_cache_un_seul_calcul_a_la_fois_meme_apres_un_echec`,
+  `test_clip_service_async_clip_garde_servi_pendant_une_lecture`. pytest 140 réussis (Postgres compris) ; ruff
+  OK ; pyright `rlpi.web` 0 erreur.
+
+## 2026-11-20 — Revoir une action : caméras rattrapées par le worker
+
+- Le serveur web ne lit plus jamais les caméras dans le replay (environ 250 Mo par lecture, deux possibles en même
+  temps) : sans `cameras.json`, le clip part sans caméra (réglages par défaut du jeu dans le lecteur).
+- `python -m rlpi.worker backfill-cameras` : pour chaque partie `ok`/`partiel` sans `cameras.json`, télécharge le
+  replay et lit les caméras dans un processus séparé (`rlpi.game.cameras`, sous-commande `_cameras`), une partie à
+  la fois, puis dépose le fichier. Parties sans replay gardé ou au replay illisible : comptées et passées. Sans
+  risque à relancer. Commande à lancer une fois après la fusion (`docs/REGLAGES_COOLIFY.md`).
+- Tests (écrits d'abord, en échec avant le correctif) : `test_rattrapage_cameras` (worker),
+  `test_cameras_dans_un_processus_separe` (vrai replay de `data/raw/` comparé à la lecture directe, replay abîmé
+  → erreur sans fichier), `test_clip_service_sans_cameras` ; `synthetic_replay` refuse toute lecture des caméras
+  côté web. pytest 143 réussis (Postgres compris) ; ruff OK.

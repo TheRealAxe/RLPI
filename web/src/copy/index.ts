@@ -1,7 +1,7 @@
 // Textes de l'interface (spec Plateau, COPY.md) : verdicts, formulations par indicateur, phrases de lecture.
 // Ton : tutoiement, phrases courtes, on constate sans juger. Repris de l'ancien gabarit.
 import type { Perf, PerfMatch } from "@/api/client";
-import { NB, R, cap, ord } from "@/lib/format";
+import { NB, R, cap, clock, ord, sgn } from "@/lib/format";
 
 type N = number | null | undefined;
 
@@ -107,3 +107,34 @@ export function synVerdict(r: { sens: number; lo: number | null; hi: number | nu
     worse = r.sens > 0 ? hi < ssl : lo > ssl;
   return better ? ["mieux que les SSL", "pl-good"] : worse ? ["moins bien que les SSL", "pl-bad"] : ["comme les SSL", "pl-muted"];
 }
+
+// ------------------------------------------------------------------ Revoir une touche en 3D
+
+/** Textes de la fenêtre « Revoir » et de ses boutons. */
+export const REVOIR = {
+  button: "▶ Revoir",
+  loading: "Préparation du clip…",
+  loadingNote: "Le premier clip d'un match prend environ une seconde : le replay est relu.",
+  note: "Reconstitution 3D à partir du replay, pas une vidéo du jeu. En jaune : l'auteur de la touche (face blanche = avant de la voiture).",
+  author: "Auteur de la touche",
+  pov: "Vue joueur",
+  povTitle: "Voir depuis la caméra de l'auteur de la touche",
+  ballCam: "caméra balle",
+  carCam: "caméra voiture",
+  povNote: "Vue joueur : sa caméra (réglages et caméra balle) relevée dans le replay ; le stick droit n'y est pas enregistré.",
+  povDefault: "Vue joueur : réglages caméra par défaut (non relevés pour cette partie).",
+  retry: "Réessayer",
+  close: "Fermer ✕",
+};
+
+/** En-tête de la fenêtre : « Dégagement · 2:31 · situation −0,30 → −0,60 ». */
+export function replayTitle(t: { action: string; clock?: number | null; vb?: number | null; va?: number | null }): string {
+  const parts = [act1(t.action)];
+  if (t.clock != null) parts.push(clock(t.clock));
+  if (t.vb != null && t.va != null) parts.push(`situation ${sgn(t.vb)} → ${sgn(t.va)}`);
+  return parts.join(" · ");
+}
+
+/** Nom accessible d'un bouton « Revoir » : « Revoir en 3D : tir à 2:31 ». */
+export const replayLabel = (t: { action: string; clock?: number | null }): string =>
+  `Revoir en 3D : ${act1(t.action).toLowerCase()}${t.clock != null ? ` à ${clock(t.clock)}` : ""}`;

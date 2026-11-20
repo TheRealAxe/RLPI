@@ -571,6 +571,7 @@ dependencies = [
 server = [
     { name = "fastapi" },
     { name = "pydantic-settings" },
+    { name = "subtr-actor-py" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 worker = [
@@ -606,6 +607,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5" },
     { name = "requests", marker = "extra == 'worker'", specifier = ">=2.32" },
     { name = "scikit-learn", marker = "extra == 'worker'", specifier = ">=1.9" },
+    { name = "subtr-actor-py", marker = "extra == 'server'", specifier = "==1.5.1" },
     { name = "subtr-actor-py", marker = "extra == 'worker'", specifier = "==1.5.1" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.54.0" },
 ]

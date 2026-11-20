@@ -15,7 +15,8 @@ import json
 import math
 import threading
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
@@ -59,12 +60,38 @@ def dumps(data) -> bytes:
     return text.encode("utf-8")
 
 
+class KeyedLocks:
+    """Un verrou par clé. Il n'est retiré que quand plus personne ne le tient ni ne l'attend : une demande qui
+    arrive pendant qu'une autre attend reçoit le même verrou (sinon les deux calculeraient en parallèle)."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.locks: dict[str, tuple[threading.Lock, list[int]]] = {}  # clé → (verrou, [demandes en cours])
+
+    def __len__(self) -> int:
+        return len(self.locks)
+
+    @contextmanager
+    def __call__(self, key: str) -> Iterator[None]:
+        with self.lock:
+            lk, users = self.locks.setdefault(key, (threading.Lock(), [0]))
+            users[0] += 1
+        try:
+            with lk:
+                yield
+        finally:
+            with self.lock:
+                users[0] -= 1
+                if users[0] == 0:
+                    del self.locks[key]
+
+
 class JsonCache:
     def __init__(self, max_entries: int = MAX_ENTRIES):
         self.max = max_entries
         self.mem: OrderedDict[str, bytes] = OrderedDict()
         self.lock = threading.Lock()
-        self.key_locks: dict[str, threading.Lock] = {}
+        self.key_locks = KeyedLocks()
 
     def get(self, key: str) -> bytes | None:
         with self.lock:
@@ -85,15 +112,9 @@ class JsonCache:
         gz = self.get(key)
         if gz is not None:
             return gz
-        with self.lock:
-            kl = self.key_locks.setdefault(key, threading.Lock())
-        try:
-            with kl:
-                gz = self.get(key)
-                if gz is None:
-                    gz = gzip.compress(dumps(build()), compresslevel=GZIP_LEVEL)
-                    self.put(key, gz)
-        finally:
-            with self.lock:
-                self.key_locks.pop(key, None)
+        with self.key_locks(key):
+            gz = self.get(key)
+            if gz is None:
+                gz = gzip.compress(dumps(build()), compresslevel=GZIP_LEVEL)
+                self.put(key, gz)
         return gz

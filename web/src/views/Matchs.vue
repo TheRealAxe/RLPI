@@ -4,6 +4,7 @@
 import { computed, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import MI from "@/components/MI.vue";
+import ReplayButton from "@/components/ReplayButton.vue";
 import Scope from "@/components/Scope.vue";
 import Sym from "@/components/Sym.vue";
 import Timeline from "@/components/Timeline.vue";
@@ -147,7 +148,8 @@ const flow = computed(() => {
             <template v-if="costly.length">
               <div v-for="(t, k) in costly" :key="k" class="pl-row pl-small">
                 <span class="pl-dx">#{{ k + 1 }}</span><span>{{ t.clock != null ? clock(t.clock) : "" }}</span><span>{{ act1(t.a) }}</span>
-                <span class="pl-bad" style="font-weight: 800; text-align: right">{{ sgn(t.dv) }}</span>
+                <span class="pl-bad dv">{{ sgn(t.dv) }}</span>
+                <ReplayButton :match="m.replay" :i="t.i" :action="t.a" :clock="t.clock" :vb="t.vb" :va="t.va" :date="m.date" />
               </div>
             </template>
             <p v-else class="pl-small pl-muted">Aucune touche n'a dégradé la situation.</p>

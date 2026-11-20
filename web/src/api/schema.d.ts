@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/joueurs/{id}/matchs/{match}/clips/{i}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Clip 3D d'une touche (3 s avant, 1 s après, 30 images/s), découpé dans le replay
+         * @description Le replay brut est lu au premier clic sur un match (moins d'une seconde) ; les clips suivants du même match et les clips déjà vus sont servis depuis la mémoire.
+         */
+        get: operations["clip_api_joueurs__id__matchs__match__clips__i__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/joueurs/{id}/profil": {
         parameters: {
             query?: never;
@@ -322,6 +342,117 @@ export interface components {
             /** Sert */
             sert: number | null;
         };
+        /**
+         * Clip
+         * @description Clip 3D d'une touche, au format des cartes du Swipe (lu par web/src/swipe/player.ts).
+         */
+        Clip: {
+            /**
+             * Action Frame
+             * @description Image de la touche dans le clip
+             */
+            action_frame: number;
+            /**
+             * Ball
+             * @description Position de la balle à chaque image
+             */
+            ball: number[][];
+            /**
+             * Ball V
+             * @description Vitesse de la balle à chaque image
+             */
+            ball_v: number[][];
+            /** @description Caméra du joueur mis en avant, si relevée */
+            cam?: components["schemas"]["ClipCam"] | null;
+            /** Cars */
+            cars: components["schemas"]["ClipCar"][];
+            /**
+             * Fps
+             * @description Images par seconde (30)
+             */
+            fps: number;
+            /**
+             * Id
+             * @description « <partie>:<i> »
+             */
+            id: string;
+        };
+        /**
+         * ClipCam
+         * @description Caméra du joueur mis en avant, relevée dans le replay (vue joueur du lecteur).
+         */
+        ClipCam: {
+            /**
+             * Angle
+             * @description Inclinaison (degrés, négatif : vers le bas)
+             */
+            angle?: number | null;
+            /**
+             * Ball Cam
+             * @description Caméra balle (1) ou caméra voiture (0) à chaque image
+             */
+            ball_cam: number[];
+            /**
+             * Distance
+             * @description Distance derrière la voiture (unités du jeu)
+             */
+            distance?: number | null;
+            /**
+             * Fov
+             * @description Champ de vision horizontal (degrés)
+             */
+            fov?: number | null;
+            /**
+             * Height
+             * @description Hauteur au-dessus de la voiture (unités du jeu)
+             */
+            height?: number | null;
+            /**
+             * Known
+             * @description Réglages relevés dans le replay (sinon : réglages par défaut du lecteur)
+             */
+            known: boolean;
+            /**
+             * Stiffness
+             * @description Raideur (0 : caméra souple, 1 : rigide)
+             */
+            stiffness?: number | null;
+        };
+        /** ClipCar */
+        ClipCar: {
+            /**
+             * Boost
+             * @description Boost (0 à 100)
+             */
+            boost: number[];
+            /**
+             * Fw
+             * @description Vecteur unitaire vers l'avant de la voiture
+             */
+            fw: number[][];
+            /**
+             * Judged
+             * @description Voiture mise en avant : l'auteur de la touche
+             */
+            judged: boolean;
+            /**
+             * Pos
+             * @description Position (x, y, z) à chaque image, en unités du jeu
+             */
+            pos: number[][];
+            /** Team */
+            team: number;
+            /**
+             * Up
+             * @description Vecteur unitaire vers le haut de la voiture
+             */
+            up: number[][];
+            /**
+             * Vel
+             * @description Vitesse (x, y, z) à chaque image
+             */
+            vel: number[][];
+        };
         /** Compo */
         Compo: {
             /** Key */
@@ -423,12 +554,24 @@ export interface components {
             clock: number | null;
             /** Dv */
             dv: number | null;
+            /**
+             * I
+             * @description Indice de l'image de la touche dans la partie (10 images/s) : clé pour la revoir
+             */
+            i: number;
             /** K */
             k: number;
             /** Va */
             va: number | null;
             /** Vb */
             vb: number | null;
+            /**
+             * X
+             * @description Position de la balle à la touche
+             */
+            x: number | null;
+            /** Y */
+            y: number | null;
         };
         /** DecInfo */
         DecInfo: {
@@ -1383,6 +1526,11 @@ export interface components {
             date: string;
             /** Dv */
             dv: number | null;
+            /**
+             * I
+             * @description Indice de l'image de la touche dans la partie (10 images/s) : clé pour la revoir
+             */
+            i: number;
             /** Kind */
             kind: string;
             /** Replay */
@@ -1586,6 +1734,66 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    clip_api_joueurs__id__matchs__match__clips__i__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                match: string;
+                /** @description Indice de l'image de la touche (10 images/s) */
+                i: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Clip"];
+                };
+            };
+            /** @description Inchangé depuis la version du navigateur (en-tête If-None-Match) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Pas de session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Joueur différent du joueur connecté */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Partie inconnue (ou pas la sienne), touche inconnue, ou replay non conservé */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Touche impossible à retrouver dans le replay, ou trop près de son début ou de sa fin */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

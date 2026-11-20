@@ -78,7 +78,7 @@ describe("panneau Méthode", () => {
   const d = derive(base, null);
   it("toutes les rubriques, avec leurs nombres", () => {
     const g = glossary(d);
-    expect(g.map((r) => r.id)).toEqual(["indice", "valeur", "gain", "resultat", "placement", "choix", "centile", "styles", "conseils", "progression", "synergie", "passes", "style", "terrain"]);
+    expect(g.map((r) => r.id)).toEqual(["indice", "valeur", "gain", "revoir", "resultat", "placement", "choix", "centile", "styles", "conseils", "progression", "synergie", "passes", "style", "terrain"]);
     const all = JSON.stringify(g);
     expect(all).not.toMatch(/undefined|NaN|<b>/);
   });
