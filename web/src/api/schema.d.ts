@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/api/clips": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Demander le ralenti d'une de ses touches */
+        post: operations["ask_api_clips_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/clips/{partie}/{image}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** État du ralenti, et le ralenti quand il est prêt */
+        get: operations["read_api_clips__partie___image__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/joueurs/{id}/matchs/{match}": {
         parameters: {
             query?: never;
@@ -456,6 +490,27 @@ export interface components {
              * @constant
              */
             statut: "en_attente";
+        };
+        /** DemandeRalenti */
+        DemandeRalenti: {
+            /**
+             * Image
+             * @description Image de la touche à 10 images/s (champ `i` d'une touche)
+             */
+            image: number;
+            /**
+             * Partie
+             * @description Identifiant de la partie (champ `match` d'une touche)
+             */
+            partie: string;
+        };
+        /** EtatRalenti */
+        EtatRalenti: {
+            /**
+             * Statut
+             * @enum {string}
+             */
+            statut: "aucun" | "en_attente" | "pret" | "erreur";
         };
         /**
          * Fiche
@@ -1097,6 +1152,23 @@ export interface components {
                 [key: string]: number | null;
             };
         };
+        /** Ralenti */
+        Ralenti: {
+            /**
+             * Clip
+             * @description Ralenti (même format qu'une carte du swipe : balle et 6 voitures à 30 images/s, `action_frame` = image de la touche, voiture `judged` = le joueur) ; présent quand le statut est « pret »
+             */
+            clip?: {
+                [key: string]: unknown;
+            } | null;
+            /** Erreur */
+            erreur?: string | null;
+            /**
+             * Statut
+             * @enum {string}
+             */
+            statut: "aucun" | "en_attente" | "pret" | "erreur";
+        };
         /** Record */
         Record: {
             /**
@@ -1383,8 +1455,18 @@ export interface components {
             date: string;
             /** Dv */
             dv: number | null;
+            /**
+             * I
+             * @description Image de la touche à 10 images/s (absente des anciens agrégats)
+             */
+            i?: number | null;
             /** Kind */
             kind: string;
+            /**
+             * Match
+             * @description Identifiant de la partie (ralenti : POST /api/clips)
+             */
+            match?: string | null;
             /** Replay */
             replay: string;
             /** Role */
@@ -1529,6 +1611,71 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    ask_api_clips_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DemandeRalenti"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EtatRalenti"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_api_clips__partie___image__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partie: string;
+                image: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ralenti"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     match_api_joueurs__id__matchs__match__get: {
         parameters: {
             query?: never;

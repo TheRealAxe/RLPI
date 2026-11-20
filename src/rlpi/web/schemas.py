@@ -435,6 +435,8 @@ class Tech(Strict):
 
 class Touch(Strict):
     replay: str
+    match: str | None = Field(default=None, description="Identifiant de la partie (ralenti : POST /api/clips)")
+    i: int | None = Field(default=None, description="Image de la touche à 10 images/s (absente des anciens agrégats)")
     date: str
     clock: Num
     action: str

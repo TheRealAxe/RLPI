@@ -24,6 +24,8 @@ export type SynergyPair = S["SynergyPair"];
 export type TechRow = S["TechRow"];
 export type Modeles = S["Modeles"];
 export type Actualisation = S["Actualisation"];
+export type Ralenti = S["Ralenti"];
+export type EtatRalenti = S["EtatRalenti"];
 
 /** Erreur HTTP lisible : statut + message de l'API (`detail`) quand il existe. */
 export class ApiError extends Error {
@@ -71,4 +73,8 @@ export const api = {
   tableau: (id: string, q: URLSearchParams, signal?: AbortSignal) =>
     getJson<Tableau>(`${player(id)}/tableau${q.toString() ? "?" + q : ""}`, signal),
   modeles: (signal?: AbortSignal) => getJson<Modeles>("/api/modeles", signal),
+  /** Ralenti d'une de ses touches (rlpi.clips) : état, et le clip quand il est prêt. */
+  ralenti: (partie: string, image: number, signal?: AbortSignal) =>
+    getJson<Ralenti>(`/api/clips/${encodeURIComponent(partie)}/${image}`, signal),
+  demanderRalenti: (partie: string, image: number) => postJson<EtatRalenti>("/api/clips", { partie, image }),
 };

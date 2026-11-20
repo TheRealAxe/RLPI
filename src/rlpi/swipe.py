@@ -113,9 +113,10 @@ def resample_dir(vec: np.ndarray, pos: np.ndarray, src_fps: int, out_n: int, out
 
 
 def extract(source: str, replay: str, picks: list[dict], frames_dir: Path | None = None,
-            replay_path: str | Path | None = None) -> list[dict]:
+            replay_path: str | Path | None = None, before: float = BEFORE, after: float = AFTER) -> list[dict]:
     """Cartes des touches `picks` d'un replay. `frames_dir` : dossier des images (défaut frames/<source>/ du
-    dossier de données) ; `replay_path` : replay brut (défaut : chemin noté à l'extraction, meta["path"])."""
+    dossier de données) ; `replay_path` : replay brut (défaut : chemin noté à l'extraction, meta["path"]) ;
+    `before` / `after` : secondes gardées avant et après la touche (ralentis plus longs : rlpi.clips)."""
     import subtr_actor as sa
 
     fd = frames_dir or FRAMES / source
@@ -139,11 +140,11 @@ def extract(source: str, replay: str, picks: list[dict], frames_dir: Path | None
         j = lo + int(np.argmin(d))
         if d.min() > 50:
             continue  # alignement douteux : carte écartée
-        j0, j1 = j - int(BEFORE * SRC_FPS), j + int(AFTER * SRC_FPS) + 1
+        j0, j1 = j - int(before * SRC_FPS), j + int(after * SRC_FPS) + 1
         if j0 < 0 or j1 > len(a):
             continue
         seg = a[j0:j1]
-        n_out = int((BEFORE + AFTER) * FPS) + 1
+        n_out = int((before + after) * FPS) + 1
         g = lambda name: seg[:, gi[name]]  # noqa: E731
         pc = lambda k, name: seg[:, ng + k * npl + ph.index(name)]  # noqa: E731
         xyz = lambda f: np.column_stack([f("x"), f("y"), f("z")])  # noqa: E731
@@ -165,7 +166,7 @@ def extract(source: str, replay: str, picks: list[dict], frames_dir: Path | None
             continue
         out.append({
             "id": f"{source}:{replay}:{i10}", "origin": p["origin"], "action": p["action"],
-            "fps": FPS, "action_frame": int(BEFORE * FPS), **dict(zip(("ball", "ball_v"), (lambda bp, bv: (np.round(bp).astype(int).tolist(), np.round(bv).astype(int).tolist()))(
+            "fps": FPS, "action_frame": int(before * FPS), **dict(zip(("ball", "ball_v"), (lambda bp, bv: (np.round(bp).astype(int).tolist(), np.round(bv).astype(int).tolist()))(
                 *resample(xyz(lambda c: g(f"Ball - position {c}")), xyz(lambda c: g(f"Ball - linear velocity {c}")), SRC_FPS, n_out, FPS)))),
             "cars": cars,
         })

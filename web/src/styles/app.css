@@ -138,6 +138,12 @@ svg text { font-family: var(--font-sans); font-size: var(--fs-axis); font-weight
 .fiche .open { margin-top: var(--space-2); text-decoration: underline; text-underline-offset: 3px; align-self: flex-start; }
 .others .pl-row { display: grid; grid-template-columns: 32px 70px 60px minmax(0, 1fr) 90px 70px; gap: var(--space-3); width: 100%; text-align: left; }
 .others .pl-row:hover { background: var(--surface-alt); }
+.fiche .acts { display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: baseline; }
+.fiche .acts .open { align-self: auto; }
+.fiche .replay { font-weight: 800; }
+.others .rrow { display: flex; align-items: center; gap: var(--space-2); }
+.others .rrow .pl-row { flex: 1; min-width: 0; }
+.others .rrow .replay { flex: none; padding: 4px 10px; }
 .gainrow { display: grid; grid-template-columns: minmax(110px, 170px) minmax(0, 1fr) 70px; gap: var(--space-3); align-items: center; padding: 6px 0; border-bottom: 1px solid var(--rule); }
 .gainrow .vl { font-size: var(--dx-26); text-align: right; }
 .legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); align-items: center; margin-top: var(--space-2); }

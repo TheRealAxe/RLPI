@@ -65,6 +65,7 @@ def touch_rows(df: pl.DataFrame) -> list[dict]:
     return [
         {
             "replay": r["replay"],
+            "i": r["i"],
             "date": r["date"],
             "clock": r["clock"],
             "action": ACTION_FR.get(r["action"], r["action"]),
@@ -321,7 +322,7 @@ def section(ref: dict | None, games: Games, player: str, my_replays: list[str], 
             )
 
     def best_rows(key: str, n: int, descending: bool) -> list[dict]:
-        cand = [t for _gm, pg in mine_pg for t in pg.details.get(key, [])]
+        cand = [t | {"match": gm.match_id} for gm, pg in mine_pg for t in pg.details.get(key, [])]
         if not cand:
             return []
         return pl.DataFrame(cand, infer_schema_length=None).sort("dv", descending=descending).head(n).to_dicts()

@@ -145,7 +145,7 @@ def ready() -> tuple[bool, dict[str, str]]:
 
 def create_app() -> FastAPI:
     from rlpi.web import spa
-    from rlpi.web.routes import api, auth, redirects, swipe
+    from rlpi.web.routes import api, auth, clips, redirects, swipe
 
     logs.configure("web")
     settings = get_settings()  # configuration vérifiée tout de suite : le serveur ne démarre pas si elle manque
@@ -172,6 +172,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(api.router)
     app.include_router(swipe.router)
+    app.include_router(clips.router)
     app.include_router(redirects.router)
     spa.mount(app, settings.web_dist, "")  # en dernier : tout chemin non pris par le serveur
     return app

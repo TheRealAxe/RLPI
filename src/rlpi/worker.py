@@ -8,6 +8,8 @@ Tâches de la file Redis (voir rlpi.store) :
     {"type": "aggregate", "match": <id>}  (re)calculer les agrégats du tableau de bord d'une partie déjà traitée,
                                        à partir de games/<id>/ (rlpi.dashboard.storage)
     {"type": "swipe", "deck": <id>}    fabriquer un paquet de cartes à juger demandé sur le site (rlpi.swipe_online)
+    {"type": "clip", "match": <id>, "player": <id>}  découper les ralentis demandés de ce joueur dans cette partie
+                                       (« Revoir » dans « À travailler », rlpi.clips)
 
 Après chaque partie traitée, le worker calcule ses agrégats (rlpi.dashboard.aggregate) et les écrit dans Postgres :
 le serveur n'a plus qu'à les lire. Cinq minutes après son démarrage (RLPI_BACKFILL_DELAY), puis une fois par heure,
@@ -415,6 +417,18 @@ class Worker:
         except Exception as e:  # noqa: BLE001
             log("paquet swipe : échec", "error", paquet=deck_id, erreur=f"{type(e).__name__}: {e}"[:500])
 
+    def process_clip(self, match_id: str, player: str) -> None:
+        """Ralentis demandés sur le site (voir rlpi.clips). Pas de nouvel essai : le joueur voit l'erreur et peut
+        redemander."""
+        from rlpi import clips
+
+        t = time.time()
+        try:
+            n = clips.build(self.conn, self.s3, self.bucket, match_id, player, log)
+            log("ralentis prêts", match=match_id, ralentis=n, duree_s=round(time.time() - t))
+        except Exception as e:  # noqa: BLE001
+            log("ralentis : échec", "error", match=match_id, erreur=f"{type(e).__name__}: {e}"[:500])
+
     def backfill(self) -> None:
         """Met en file les parties sans agrégats à jour (un seul worker, une fois par heure et par version), sauf
         celles dont le calcul de cette version attend en lettre morte (relancer avec `retry`)."""
@@ -470,6 +484,8 @@ class Worker:
             self.process_aggregate(task["match"], raw)
         elif task.get("type") == "swipe":
             self.process_swipe(int(task["deck"]))
+        elif task.get("type") == "clip":
+            self.process_clip(str(task["match"]), str(task["player"]))
         else:
             self.bury("inconnue", None, raw, f"type de tâche inconnu : {task.get('type')!r}")
 

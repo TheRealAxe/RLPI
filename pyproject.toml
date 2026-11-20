@@ -79,7 +79,7 @@ addopts = "-ra"
 
 [tool.pyright]
 include = ["src/rlpi/store.py", "src/rlpi/account.py", "src/rlpi/worker.py", "src/rlpi/migrate.py", "src/rlpi/context.py",
-           "src/rlpi/dashboard", "src/rlpi/web", "src/rlpi/events.py", "src/rlpi/swipe_online.py",
+           "src/rlpi/dashboard", "src/rlpi/web", "src/rlpi/events.py", "src/rlpi/swipe_online.py", "src/rlpi/clips.py",
            "src/rlpi/logs.py", "src/rlpi/backup.py"]
 pythonVersion = "3.13"
 typeCheckingMode = "standard"

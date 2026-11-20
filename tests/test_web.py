@@ -229,6 +229,8 @@ def test_documentation_de_l_api(client):
         "/api/modeles",
         "/api/swipe/deck",
         "/api/swipe/jugements",
+        "/api/clips",
+        "/api/clips/{partie}/{image}",
     ):
         assert p in paths, p
     assert client.get("/docs").status_code == 200
@@ -580,3 +582,52 @@ def test_swipe_paquet_a_l_aveugle(app_db, tmp_path, monkeypatch):
     bad = c.post("/api/swipe/jugements", json={"paquet": did, "carte": "inconnue", "verdict": "bien"})
     assert bad.status_code == 404
     assert c.post("/api/swipe/jugements", json={"paquet": did, "carte": card, "verdict": "bof"}).status_code == 422
+
+
+# ------------------------------------------------------------------------------------------------ ralentis
+
+
+def test_ralenti_d_une_touche(app_db):
+    from psycopg.types.json import Jsonb
+
+    c, r, db = app_db
+    other = "Steam:76561190000000007"
+    with psycopg.connect(db, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO matches (id, source, status, replay_key) VALUES ('m1', 'fichier', 'ok', 'replays/m1')"
+        )
+        conn.execute(
+            "INSERT INTO matches (id, source, status, replay_key) VALUES ('m2', 'fichier', 'ok', 'replays/m2')"
+        )
+        conn.execute("INSERT INTO match_players (match_id, player_id, team) VALUES ('m1', %s, 0)", (ME,))
+        conn.execute("INSERT INTO match_players (match_id, player_id, team) VALUES ('m2', %s, 0)", (other,))
+    assert c.get("/api/clips/m1/120").status_code == 401  # connexion nécessaire
+    login(c, ME, db)
+    assert c.get("/api/clips/m1/120").json() == {"statut": "aucun", "erreur": None, "clip": None}
+    assert c.post("/api/clips", json={"partie": "m2", "image": 120}).status_code == 404  # pas une de ses parties
+    assert c.post("/api/clips", json={"partie": "m1", "image": -1}).status_code == 422
+    assert (
+        c.post("/api/clips", json={"partie": "m1", "image": 120}, headers={"Origin": "https://x.example"}).status_code
+        == 403
+    )
+    d = c.post("/api/clips", json={"partie": "m1", "image": 120})
+    assert d.status_code == 202 and d.json() == {"statut": "en_attente"}
+    assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "en_attente"}
+    assert [json.loads(x) for x in r.lrange(store.QUEUE, 0, -1)] == [{"type": "clip", "match": "m1", "player": ME}]
+    # Ce que fait le worker : ralenti prêt
+    clip = {"id": "m1:120", "fps": 30, "action_frame": 120, "ball": [], "ball_v": [], "cars": []}
+    with psycopg.connect(db, autocommit=True) as conn:
+        conn.execute("UPDATE clips SET status = 'pret', clip = %s WHERE match_id = 'm1'", (Jsonb(clip),))
+    got = c.get("/api/clips/m1/120")
+    assert got.json() == {"statut": "pret", "erreur": None, "clip": clip} and "max-age" in got.headers["cache-control"]
+    assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "pret"}
+    assert r.llen(store.QUEUE) == 1  # rien de plus à fabriquer
+    # Un ralenti en erreur est redemandé
+    with psycopg.connect(db, autocommit=True) as conn:
+        conn.execute("UPDATE clips SET status = 'erreur', error = 'x', clip = NULL WHERE match_id = 'm1'")
+    assert c.get("/api/clips/m1/120").json()["statut"] == "erreur"
+    assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "en_attente"}
+    assert r.llen(store.QUEUE) == 2
+    # Les ralentis d'un autre joueur ne se lisent pas
+    login(c, other, db)
+    assert c.get("/api/clips/m1/120").json()["statut"] == "aucun"
