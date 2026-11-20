@@ -57,6 +57,7 @@ def env(db, monkeypatch, tmp_path):
     monkeypatch.setenv("RLPI_SYNC_MINUTES", "0")
     monkeypatch.setenv("RLPI_STATE_MINUTES", "0")  # ligne « état » appelée à la main dans les tests
     monkeypatch.setenv("RLPI_BACKUP_HOUR", "off")
+    monkeypatch.setenv("RLPI_BACKFILL_DELAY", "3600")  # rattrapage des agrégats : seulement dans ses tests
     monkeypatch.setattr(worker.time, "sleep", lambda s: None)
     models = tmp_path / "models"
     models.mkdir()
@@ -274,9 +275,10 @@ def test_agregats_apres_partie(env, db, monkeypatch, joueurs):
         ).fetchone() == (1,)
 
 
-def test_rattrapage_au_demarrage(env, db, joueurs):
-    """Partie traitée avant les agrégats : mise en file au démarrage, calculée depuis le stockage."""
+def test_rattrapage_au_demarrage(env, db, joueurs, monkeypatch):
+    """Partie traitée avant les agrégats : mise en file par le rattrapage, calculée depuis le stockage."""
     r, s3 = env
+    monkeypatch.setenv("RLPI_BACKFILL_DELAY", "0")
     src = FIXTURE_GAMES / "partie-02"
     for f in src.rglob("*"):
         if f.is_file():
@@ -289,6 +291,94 @@ def test_rattrapage_au_demarrage(env, db, joueurs):
     r.lpush(store.QUEUE, json.dumps({"type": "aggregate", "match": "partie-02"}))
     run_tasks(1)
     assert r.llen(store.QUEUE) == 0
+
+
+def test_rattrapage_decale(env, db):
+    """Pas de rattrapage au démarrage : l'ancien worker, encore actif pendant un redéploiement, jetterait les tâches."""
+    r, s3 = env
+    add_match(db, s3, "sans-agregats", status="ok")
+    w = worker.Worker()
+    w.r.lpush(store.QUEUE, json.dumps({"type": "autre"}))  # une tâche pour que la boucle tourne une fois
+    w.process = lambda raw: setattr(w, "stop", True)
+    w.run()
+    assert r.llen(store.QUEUE) == 0 and not r.keys(worker.BACKFILL_LOCK + "*")
+
+
+def test_rattrapage_sans_les_lettres_mortes(env, db):
+    """Une partie dont le calcul est en lettre morte n'est pas remise en file à chaque rattrapage… sauf si la lettre
+    morte date d'une version de calcul plus ancienne : la nouvelle version corrige peut-être l'échec."""
+    from rlpi.dashboard import aggregate, storage
+
+    r, s3 = env
+    add_match(db, s3, "casse", status="ok")
+    add_match(db, s3, "a-faire", status="ok")
+    add_match(db, s3, "ancienne", status="ok")
+    with psycopg.connect(db, autocommit=True) as c:
+        c.execute(
+            "INSERT INTO dead_tasks (kind, ref, task, error, version) VALUES "
+            "('aggregate', 'casse', '{}', 'x', %s), ('aggregate', 'ancienne', '{}', 'x', %s), "
+            "('aggregate', 'ancienne', '{}', 'x', NULL)",
+            (aggregate.VERSION, aggregate.VERSION - 1),
+        )
+        assert storage.missing(c, skip_dead=True) == ["a-faire", "ancienne"]
+        assert storage.missing(c) == ["a-faire", "ancienne", "casse"]
+    w = worker.Worker()
+    w.backfill()
+    assert [json.loads(x)["match"] for x in r.lrange(store.QUEUE, 0, -1)] == ["ancienne", "a-faire"]
+
+
+def test_lettre_morte_agregats_porte_la_version(env, db, monkeypatch):
+    """Un calcul d'agrégats abandonné garde la version du calcul (le rattrapage s'en sert)."""
+    from rlpi.dashboard import aggregate, storage
+
+    _, s3 = env
+    add_match(db, s3, "casse", status="ok")
+
+    def boom(*a, **k):
+        raise RuntimeError("calcul impossible")
+
+    monkeypatch.setattr(storage, "compute_match", boom)
+    w = worker.Worker()
+    w.process_aggregate("casse", json.dumps({"type": "aggregate", "match": "casse"}))
+    with psycopg.connect(db, autocommit=True) as c:
+        assert c.execute("SELECT kind, ref, version FROM dead_tasks").fetchall() == [
+            ("aggregate", "casse", aggregate.VERSION)
+        ]
+        assert storage.missing(c, skip_dead=True) == []
+
+
+def test_taches_orphelines_reprises(env, db, monkeypatch):
+    """Tâches « en cours » d'un worker disparu : remises en file après ORPHAN_GRACE sans signal de vie."""
+    r, _ = env
+    task = json.dumps({"type": "aggregate", "match": "m"})
+    r.lpush(store.PROCESSING + "disparu", task)
+    r.lpush(store.PROCESSING + "vivant", task)
+    r.set(worker.ALIVE + "vivant", "1")
+    w = worker.Worker()
+    assert w.reclaim_orphans() == 0  # vu sans signal de vie : délai de grâce
+    assert r.llen(store.PROCESSING + "disparu") == 1
+    now = worker.time.time()
+    monkeypatch.setattr(worker.time, "time", lambda: now + worker.ORPHAN_GRACE + 1)
+    assert w.reclaim_orphans() == 1
+    assert r.lrange(store.QUEUE, 0, -1) == [task]
+    assert r.llen(store.PROCESSING + "disparu") == 0 and r.llen(store.PROCESSING + "vivant") == 1
+    assert not r.exists(worker.ORPHAN + "disparu")
+
+
+def test_signal_de_vie(env, db):
+    r, _ = env
+    w = worker.Worker()
+    w.r.lpush(store.QUEUE, json.dumps({"type": "autre"}))
+    seen = []
+
+    def process(raw):
+        seen.append(r.ttl(worker.ALIVE + "test-1"))
+        w.stop = True
+
+    w.process = process
+    w.run()
+    assert 0 < seen[0] <= worker.ALIVE_TTL
+    assert not r.exists(worker.ALIVE + "test-1")  # effacé à l'arrêt
 
 
 # ------------------------------------------------------------------------------------------------ schéma

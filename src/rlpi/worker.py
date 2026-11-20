@@ -10,8 +10,13 @@ Tâches de la file Redis (voir rlpi.store) :
     {"type": "swipe", "deck": <id>}    fabriquer un paquet de cartes à juger demandé sur le site (rlpi.swipe_online)
 
 Après chaque partie traitée, le worker calcule ses agrégats (rlpi.dashboard.aggregate) et les écrit dans Postgres :
-le serveur n'a plus qu'à les lire. Au démarrage, un des workers met en file les parties dont les agrégats manquent
-ou sont d'une version de calcul plus ancienne (rattrapage automatique après un déploiement).
+le serveur n'a plus qu'à les lire. Cinq minutes après son démarrage (RLPI_BACKFILL_DELAY), puis une fois par heure,
+un des workers met en file les parties dont les agrégats manquent ou sont d'une version de calcul plus ancienne
+(rattrapage automatique après un déploiement). Le délai laisse à Coolify le temps d'arrêter l'ancien worker, qui
+jetterait les tâches qu'il ne connaît pas.
+
+Chaque worker signale qu'il est vivant (clé Redis rlpi:worker:vivant:<id>, rafraîchie toutes les 30 s). Les tâches
+« en cours » d'un worker sans signal de vie depuis 10 minutes (conteneur supprimé) sont remises en file.
 
 En plus, toutes les RLPI_SYNC_MINUTES (défaut 15), un des workers passe sur tous les joueurs inscrits, et chaque
 jour un des workers sauvegarde la base dans Garage (rlpi.backup).
@@ -51,6 +56,8 @@ Variables d'environnement :
     RLPI_BACKUP_HOUR                              heure UTC de la sauvegarde quotidienne de la base vers Garage
                                                   (défaut 3, « off » : jamais ; voir rlpi.backup)
     RLPI_BACKUP_DAYS, RLPI_BACKUP_MONTHS          rétention des sauvegardes (défaut 14 jours, 6 mois)
+    RLPI_BACKFILL_DELAY                           secondes entre le démarrage et le premier rattrapage des
+                                                  agrégats (défaut 300)
     RLPI_STATE_MINUTES                            intervalle de la ligne « état » du journal (file, tâches en
                                                   cours, parties bloquées), écrite par un seul worker (défaut 5)
     RLPI_LOG_FORMAT                               json dans l'image (journaux structurés, rlpi.logs) ; les
@@ -71,6 +78,7 @@ import signal
 import socket
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -81,6 +89,12 @@ from rlpi.store import PROCESSING, QUEUE, safe
 MAX_ATTEMPTS = 3
 HEARTBEAT = Path(tempfile.gettempdir()) / "rlpi_worker_heartbeat"
 BACKFILL_LOCK = "rlpi:aggregate:backfill:"  # + version du calcul : un seul rattrapage par heure et par version
+ALIVE = "rlpi:worker:vivant:"  # + id du worker : signal de vie (clé qui expire, rafraîchie par un fil)
+ALIVE_TTL = 90
+ALIVE_EVERY = 30
+ORPHAN = "rlpi:worker:orphelin:"  # + id : moment où sa liste « en cours » a été vue sans signal de vie
+ORPHAN_GRACE = 600  # secondes sans signal de vie avant de remettre ses tâches en file
+ORPHAN_CHECK = 60
 STATE_LOCK = "rlpi:worker:etat"  # une seule ligne « état » par intervalle, tous workers confondus
 STUCK_MINUTES = 30  # une partie « en_cours » depuis plus longtemps est signalée comme bloquée
 REQUIRED_MODELS = ["value_h5.txt", "policy_touch.txt", "q_touch.txt", "placement_x.txt", "placement_y.txt",
@@ -167,6 +181,11 @@ class Worker:
         self.state_every = float(os.getenv("RLPI_STATE_MINUTES", "5")) * 60
         self.last_state = 0.0
         self.last_backup_check = 0.0
+        # Rattrapage des agrégats décalé : au redéploiement, l'ancien worker tourne encore quelques instants et
+        # jetterait les tâches qu'il ne connaît pas. Ensuite, un passage par heure (verrou commun).
+        self.next_backfill = time.time() + float(os.getenv("RLPI_BACKFILL_DELAY", "300"))
+        self.last_orphan_check = 0.0
+        self.alive_stop = threading.Event()
         logs.configure("worker", worker=self.id)
         self.r, self.s3, self.bucket = store.redis_client(), store.s3(), store.bucket()
         self.conn = store.connect()
@@ -190,6 +209,41 @@ class Worker:
             n += 1
         if n:
             log(f"{n} tâche(s) interrompue(s) remise(s) dans la file")
+
+    def beat(self) -> None:
+        self.r.set(ALIVE + self.id, "1", ex=ALIVE_TTL)
+
+    def _alive_loop(self) -> None:
+        """Fil : signal de vie toutes les ALIVE_EVERY secondes, même pendant une longue partie."""
+        while not self.alive_stop.wait(ALIVE_EVERY):
+            try:
+                self.beat()
+            except Exception as e:  # noqa: BLE001 — Redis indisponible un instant : on réessaie au tour suivant
+                log("signal de vie : échec", "warning", erreur=f"{type(e).__name__}: {e}"[:300])
+
+    def reclaim_orphans(self) -> int:
+        """Remet en file les tâches « en cours » d'un worker disparu (aucun signal de vie depuis ORPHAN_GRACE
+        secondes : conteneur supprimé au redéploiement, machine arrêtée). Retourne le nombre de tâches reprises."""
+        now, n = time.time(), 0
+        for key in list(self.r.scan_iter(PROCESSING + "*")):
+            wid = str(key)[len(PROCESSING):]
+            if wid == self.id:
+                continue
+            if self.r.exists(ALIVE + wid):
+                self.r.delete(ORPHAN + wid)
+                continue
+            self.r.set(ORPHAN + wid, str(now), nx=True, ex=ORPHAN_GRACE * 6)
+            seen = float(cast("str", self.r.get(ORPHAN + wid)) or now)
+            if now - seen < ORPHAN_GRACE:
+                continue
+            k = 0
+            while self.r.lmove(key, QUEUE, "RIGHT", "RIGHT"):  # traitées en premier, comme une reprise
+                k += 1
+            self.r.delete(ORPHAN + wid)
+            if k:
+                log(f"{k} tâche(s) du worker disparu {wid} remise(s) dans la file", worker_disparu=wid)
+            n += k
+        return n
 
     def set_status(self, mid: str, status: str, **fields) -> None:
         from psycopg import sql
@@ -217,8 +271,10 @@ class Worker:
         else:
             self.bury("match", mid, raw, error or "erreur inconnue", attempts)
 
-    def bury(self, kind: str, ref: str | None, raw: str, error: str, attempts: int = 1) -> None:
-        """Tâche abandonnée → lettre morte (dead_tasks), consultable avec `dead`, relançable avec `retry`."""
+    def bury(self, kind: str, ref: str | None, raw: str, error: str, attempts: int = 1,
+             version: int | None = None) -> None:
+        """Tâche abandonnée → lettre morte (dead_tasks), consultable avec `dead`, relançable avec `retry`.
+        version : celle du calcul des agrégats (tâches aggregate) ; le rattrapage les reprend quand elle change."""
         from psycopg.types.json import Jsonb
 
         try:
@@ -227,8 +283,9 @@ class Worker:
             task = {"brut": raw[:2000]}
         try:
             self.conn.execute(
-                "INSERT INTO dead_tasks (kind, ref, task, error, attempts, worker) VALUES (%s, %s, %s, %s, %s, %s)",
-                (kind, ref, Jsonb(task), error[:4000], attempts, self.id),
+                "INSERT INTO dead_tasks (kind, ref, task, error, attempts, worker, version) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (kind, ref, Jsonb(task), error[:4000], attempts, self.id, version),
             )
         except Exception as e:  # noqa: BLE001 — la tâche reste au moins visible dans le journal
             log("lettre morte : écriture impossible", "error", erreur=f"{type(e).__name__}: {e}"[:300])
@@ -315,7 +372,8 @@ class Worker:
         except Exception as e:  # noqa: BLE001
             msg = f"{type(e).__name__}: {e}"
             log("agrégats : échec", "error", match=mid, erreur=msg[:500])
-            self.bury("aggregate", mid, json.dumps({"type": "aggregate", "match": mid}), msg)
+            self.bury("aggregate", mid, json.dumps({"type": "aggregate", "match": mid}), msg,
+                      version=aggregate.VERSION)
             return
         self.announce(mid, agg)
 
@@ -330,7 +388,7 @@ class Worker:
             log("annonce : échec", "warning", match=mid, erreur=f"{type(e).__name__}: {e}"[:300])
 
     def process_aggregate(self, mid: str, raw: str) -> None:
-        from rlpi.dashboard import storage
+        from rlpi.dashboard import aggregate, storage
 
         if storage.is_current(self.conn, mid):
             return
@@ -341,7 +399,7 @@ class Worker:
         except Exception as e:  # noqa: BLE001 — pas de nouvel essai automatique : lettre morte
             msg = f"{type(e).__name__}: {e}"
             log("agrégats : échec", "error", match=mid, erreur=msg[:500])
-            self.bury("aggregate", mid, raw, msg)
+            self.bury("aggregate", mid, raw, msg, version=aggregate.VERSION)
             return
         self.announce(mid, agg)
 
@@ -358,12 +416,13 @@ class Worker:
             log("paquet swipe : échec", "error", paquet=deck_id, erreur=f"{type(e).__name__}: {e}"[:500])
 
     def backfill(self) -> None:
-        """Met en file les parties sans agrégats à jour (un seul worker, une fois par heure et par version)."""
+        """Met en file les parties sans agrégats à jour (un seul worker, une fois par heure et par version), sauf
+        celles dont le calcul de cette version attend en lettre morte (relancer avec `retry`)."""
         from rlpi.dashboard import aggregate, storage
 
         if not self.r.set(BACKFILL_LOCK + str(aggregate.VERSION), self.id, nx=True, ex=3600):
             return
-        ids = storage.missing(self.conn)
+        ids = storage.missing(self.conn, skip_dead=True)
         for mid in ids:
             self.r.lpush(QUEUE, json.dumps({"type": "aggregate", "match": mid}))
         if ids:
@@ -420,15 +479,36 @@ class Worker:
         missing = [m for m in REQUIRED_MODELS if not (models_dir() / m).exists()]
         if missing:
             raise SystemExit(f"Modèles manquants dans {models_dir()} : {', '.join(missing)}")
+        self.beat()
+        threading.Thread(target=self._alive_loop, name="vivant", daemon=True).start()
         self.recover()
-        try:
-            self.backfill()
-        except Exception as e:  # noqa: BLE001
-            log("rattrapage des agrégats : échec", "error", erreur=f"{type(e).__name__}: {e}"[:500])
         log(f"worker {self.id} prêt (modèles : {models_dir()}, recherche ballchasing toutes les "
             f"{self.sync_every / 60:.0f} min)")
+        try:
+            self.loop()
+        finally:
+            self.alive_stop.set()
+            try:
+                self.r.delete(ALIVE + self.id)
+            except Exception:  # noqa: BLE001, S110 — la clé expirera d'elle-même
+                pass
+        log("worker arrêté")
+
+    def loop(self) -> None:
         while not self.stop:
             HEARTBEAT.touch()
+            if time.time() >= self.next_backfill:
+                self.next_backfill = time.time() + 600  # verrou d'une heure : la plupart des passages ne font rien
+                try:
+                    self.backfill()
+                except Exception as e:  # noqa: BLE001
+                    log("rattrapage des agrégats : échec", "error", erreur=f"{type(e).__name__}: {e}"[:500])
+            if time.time() - self.last_orphan_check > ORPHAN_CHECK:
+                self.last_orphan_check = time.time()
+                try:
+                    self.reclaim_orphans()
+                except Exception as e:  # noqa: BLE001
+                    log("reprise des tâches orphelines : échec", "warning", erreur=f"{type(e).__name__}: {e}"[:300])
             if self.sync_every and time.time() - self.last_sync > self.sync_every and os.getenv("BALLCHASING_TOKEN"):
                 self.last_sync = time.time()
                 try:
@@ -448,7 +528,6 @@ class Worker:
                 continue
             self.process(raw)
             self.r.lrem(self.processing, 1, raw)
-        log("worker arrêté")
 
 
 # --------------------------------------------------------------------------------------------------------------

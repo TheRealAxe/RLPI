@@ -85,12 +85,16 @@ def write(conn: psycopg.Connection, agg: dict) -> None:
         )
 
 
-def missing(conn: psycopg.Connection, everything: bool = False) -> list[str]:
-    """Parties traitées dont les agrégats manquent ou sont d'une version de calcul ancienne (toutes si everything)."""
+def missing(conn: psycopg.Connection, everything: bool = False, skip_dead: bool = False) -> list[str]:
+    """Parties traitées dont les agrégats manquent ou sont d'une version de calcul ancienne (toutes si everything).
+    skip_dead : sans celles dont le calcul de la version courante attend en lettre morte (rattrapage périodique :
+    pas d'échec répété ; une nouvelle VERSION les reprend, elle corrige peut-être ce qui avait échoué)."""
     rows = conn.execute(
         "SELECT m.id FROM matches m LEFT JOIN game_aggregates g ON g.match_id = m.id "
-        "WHERE m.status IN ('ok', 'partiel') AND (%s OR g.match_id IS NULL OR g.version <> %s) ORDER BY m.id",
-        (everything, VERSION),
+        "WHERE m.status IN ('ok', 'partiel') AND (%s OR g.match_id IS NULL OR g.version <> %s) "
+        "AND NOT (%s AND EXISTS (SELECT 1 FROM dead_tasks d WHERE d.kind = 'aggregate' AND d.ref = m.id "
+        "AND d.version = %s AND d.retried_at IS NULL)) ORDER BY m.id",
+        (everything, VERSION, skip_dead, VERSION),
     ).fetchall()
     return [r[0] for r in rows]
 

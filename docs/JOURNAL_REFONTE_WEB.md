@@ -654,3 +654,16 @@ Branche `feature/amelioration-logicielle`, enchaînée sans pause avec G et I (L
   `status` les liste toujours).
 - La lettre morte se consulte en ligne de commande seulement (pas de page d'administration : pas de rôle
   administrateur sur le site).
+
+## 2026-11-20 — Worker : lettres mortes et version du calcul
+
+- Revue de cf5c07e (redéploiement du worker) : le rattrapage périodique sautait toute partie dont le calcul des
+  agrégats était en lettre morte, **même après une hausse de `aggregate.VERSION`**. Une nouvelle version qui corrige
+  l'échec ne reprenait donc jamais ces parties sans `retry` manuel.
+- Migration V8 : colonne `dead_tasks.version` (version du calcul au moment de l'abandon, tâches `aggregate`
+  seulement). `storage.missing(skip_dead=True)` ne saute plus que les lettres mortes de la version courante ; les
+  lignes antérieures (`version` NULL) sont reprises une fois, puis ré-enterrées avec leur version si elles échouent
+  encore.
+- Tests : rattrapage avec lettre morte de la version courante, d'une version ancienne et sans version ; un calcul
+  abandonné enregistre bien la version. ruff et pyright 0 ; tests Postgres non lancés en local (Docker arrêté),
+  à vérifier par la CI.
