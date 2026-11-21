@@ -677,7 +677,6 @@ def backfill_cameras() -> dict[str, int]:
     web ne lit jamais les caméras lui-même. Sans risque à relancer : les parties qui l'ont déjà sont passées, comme
     celles dont le replay n'est plus gardé (RLPI_KEEP_REPLAYS=0)."""
     from rlpi import game
-    from rlpi.web.clips import is_missing
 
     conn, cli, b = store.connect(), store.s3(), store.bucket()
     rows = conn.execute("SELECT id, replay_key FROM matches WHERE status IN ('ok', 'partiel') ORDER BY id").fetchall()
@@ -702,7 +701,7 @@ def backfill_cameras() -> dict[str, int]:
             try:
                 cli.download_file(b, key or f"replays/{mid}.replay", str(local))
             except Exception as e:  # noqa: BLE001
-                if not is_missing(e):
+                if not store.is_missing(e):
                     raise
                 counts["sans_replay"] += 1
                 continue

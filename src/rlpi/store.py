@@ -198,6 +198,14 @@ def bucket() -> str:
     return env("S3_BUCKET", "rlpi")
 
 
+def is_missing(e: Exception) -> bool:
+    """Objet absent du stockage (boto3 : ClientError 404 / NoSuchKey ; FakeS3 des tests : FileNotFoundError)."""
+    if isinstance(e, FileNotFoundError):
+        return True
+    code = str(getattr(e, "response", {}).get("Error", {}).get("Code", ""))
+    return code in ("404", "NoSuchKey", "NotFound")
+
+
 def push_match(r: redis.Redis, match_id: str) -> None:
     r.lpush(QUEUE, json.dumps({"type": "match", "match": match_id}))
 

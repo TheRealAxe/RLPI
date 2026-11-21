@@ -37,7 +37,7 @@ from typing import Any
 import anyio
 import polars as pl
 
-from rlpi import clips, pov
+from rlpi import clips, pov, store
 from rlpi.web.cache import JsonCache, KeyedLocks
 
 VERSION = (
@@ -91,14 +91,6 @@ class Game:
         return r["player_id"], clips.world_xy(r["ball_x"], r["ball_y"], team)
 
 
-def is_missing(e: Exception) -> bool:
-    """Objet absent du stockage (boto3 : ClientError 404 / NoSuchKey ; FakeS3 des tests : FileNotFoundError)."""
-    if isinstance(e, FileNotFoundError):
-        return True
-    code = str(getattr(e, "response", {}).get("Error", {}).get("Code", ""))
-    return code in ("404", "NoSuchKey", "NotFound")
-
-
 def tag(match_id: str, version: str, i: int, viewer: str) -> str:
     """ETag d'un clip : version de la découpe, partie et sa version (réanalyse), touche, et joueur connecté (sa
     touche est préférée quand deux joueurs touchent la balle dans la même image)."""
@@ -120,7 +112,6 @@ class ClipService:
 
     def storage(self) -> tuple[Any, str]:
         if self._s3 is None:
-            from rlpi import store
 
             with self.lock:
                 if self._s3 is None:
@@ -133,7 +124,7 @@ class ClipService:
         try:
             cli.download_file(bucket, key, str(dest))
         except Exception as e:
-            if is_missing(e):
+            if store.is_missing(e):
                 raise missing from None
             raise
         return dest
