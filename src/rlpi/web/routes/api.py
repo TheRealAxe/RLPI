@@ -27,7 +27,8 @@ from rlpi.web.deps import CurrentPlayer, OwnPlayer, SameOrigin
 router = APIRouter(prefix="/api", tags=["api"])
 CACHE = JsonCache()
 CLIPS = clips.ClipService()
-CLIP_CACHE_CONTROL = "private, max-age=86400"  # un jour, puis revalidation par l'ETag
+CLIP_CACHE_CONTROL = "private, no-cache"  # gardé par le navigateur mais revalidé à chaque fois (304 par l'ETag) :
+# un changement de format du clip (clips.VERSION) n'est jamais masqué par une copie gardée
 DAY = r"^\d{4}-\d{2}-\d{2}$"
 ID_LIST = Annotated[str, Query(max_length=400, description="Identifiants séparés par des virgules")]
 NOT_READY = "Aucune partie prête pour ce joueur (import ou calcul en cours)."

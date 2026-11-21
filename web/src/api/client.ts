@@ -46,8 +46,8 @@ async function detail(r: Response): Promise<string> {
   return `Erreur ${r.status}`;
 }
 
-export async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const r = await fetch(url, { credentials: "same-origin", signal, headers: { Accept: "application/json" } });
+export async function getJson<T>(url: string, signal?: AbortSignal, cache?: RequestCache): Promise<T> {
+  const r = await fetch(url, { credentials: "same-origin", signal, cache, headers: { Accept: "application/json" } });
   if (!r.ok) throw new ApiError(r.status, await detail(r));
   return (await r.json()) as T;
 }
@@ -72,7 +72,8 @@ export const api = {
   tableau: (id: string, q: URLSearchParams, signal?: AbortSignal) =>
     getJson<Tableau>(`${player(id)}/tableau${q.toString() ? "?" + q : ""}`, signal),
   modeles: (signal?: AbortSignal) => getJson<Modeles>("/api/modeles", signal),
-  /** Clip 3D d'une touche (passer par lib/clips.ts : loadClip). */
+  /** Clip 3D d'une touche (passer par lib/clips.ts : loadClip). Toujours revalidé (304 si inchangé) : une copie
+   * gardée par le navigateur avant un changement de format du clip ne doit pas être resservie telle quelle. */
   clip: (id: string, match: string, i: number, signal?: AbortSignal) =>
-    getJson<Clip>(`${player(id)}/matchs/${encodeURIComponent(match)}/clips/${i}`, signal),
+    getJson<Clip>(`${player(id)}/matchs/${encodeURIComponent(match)}/clips/${i}`, signal, "no-cache"),
 };

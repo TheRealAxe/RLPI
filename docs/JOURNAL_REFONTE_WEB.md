@@ -885,3 +885,16 @@ Branche `feature/amelioration-logicielle`, enchaînée sans pause avec G et I (L
 - Tests : `tests/test_pov.py` (rôles, repère, sauts, caméra, vrai replay), tests de `test_web.py` adaptés, vitest
   `toPov`. pytest 149 réussis (Postgres compris) ; ruff, ruff format, pyright 0 ; vue-tsc 0 ; vitest 32.
 
+
+### 2026-11-21 — « Revoir » cassé dans l'onglet Matchs (cache navigateur)
+
+- Constat : dans Matchs, « ▶ Revoir » ouvrait la fenêtre mais le player affichait « Le clip reçu est illisible ».
+  Le bouton et les données (`i` des touches de la courbe) étaient bons. Cause : les clips partaient avec
+  `Cache-Control: private, max-age=86400` ; le navigateur ressert alors sa copie pendant un jour **sans
+  revalider**, donc l'ETag changé par `clips.VERSION` 3 → 4 ne sert à rien. Les touches revues avant le passage au
+  player 3D (souvent celles de Matchs) revenaient au format du Swipe.
+- Correction : `CLIP_CACHE_CONTROL = "private, no-cache"` (copie gardée, mais revalidée à chaque clic : 304 par
+  l'ETag, une requête SQL) ; et `api.clip` force `cache: "no-cache"` côté navigateur, pour ignorer tout de suite
+  les copies déjà gardées avec l'ancien en-tête.
+- Vérifié dans le navigateur (Vite) : le clip s'ouvre dans le player 3D depuis Matchs. ruff, vue-tsc, vitest 32 ;
+  pytest clips hors Postgres réussis (le test Postgres modifié ne change que l'en-tête attendu).

@@ -898,7 +898,7 @@ def test_clip_api(clip_app):
     url = f"/api/joueurs/{ME}/matchs/{CLIP_MATCH}/clips"
     r = c.get(f"{url}/50", headers={"Accept-Encoding": "gzip"})
     assert r.status_code == 200 and r.headers["content-encoding"] == "gzip"
-    assert r.headers["cache-control"] == "private, max-age=86400" and r.headers["etag"].startswith('"clip-')
+    assert r.headers["cache-control"] == "private, no-cache" and r.headers["etag"].startswith('"clip-')
     body = r.json()
     schemas.Clip.model_validate(body)
     assert body["id"] == f"{CLIP_MATCH}:50" and ball_at(body, body["t0"]) == [-6000, -500, 93]
