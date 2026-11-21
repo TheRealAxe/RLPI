@@ -898,3 +898,15 @@ Branche `feature/amelioration-logicielle`, enchaînée sans pause avec G et I (L
   les copies déjà gardées avec l'ancien en-tête.
 - Vérifié dans le navigateur (Vite) : le clip s'ouvre dans le player 3D depuis Matchs. ruff, vue-tsc, vitest 32 ;
   pytest clips hors Postgres réussis (le test Postgres modifié ne change que l'en-tête attendu).
+
+### 2026-11-21 — Pas de bouton « Revoir » dans Matchs en prod (agrégats pas recalculés)
+
+- Constat en prod : dans `contenu.value.curves`, les touches n'ont pas `i` (ancien format `k, a, dv, va, vb,
+  clock`), alors que les pires touches (« À travailler ») l'ont. `canReplay` est faux, d'où l'absence du bouton.
+- Cause : le commit intermédiaire `7566163` avait déjà passé `aggregate.VERSION` de 1 à 2 (pour `i` sur les pires
+  et meilleures touches) ; la PR #2 a ajouté `i`, `x`, `y` à la courbe en gardant 2. La prod, déjà recalculée en
+  version 2 avec le code intermédiaire, n'a donc rien recalculé au déploiement de la PR.
+- Correction : `aggregate.VERSION` 2 → 3. Le rattrapage du worker recalcule toutes les parties (sans réanalyse) ;
+  pendant ce temps, les parties pas encore recalculées ne s'affichent pas.
+- Leçon : à la fusion d'une branche qui change les agrégats, vérifier que `VERSION` est bien **au-dessus** de
+  celle déjà déployée, pas seulement différente de celle de départ de la branche.
