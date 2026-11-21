@@ -112,7 +112,6 @@ class ClipService:
 
     def storage(self) -> tuple[Any, str]:
         if self._s3 is None:
-
             with self.lock:
                 if self._s3 is None:
                     self._s3, self._bucket = store.s3(), store.bucket()
