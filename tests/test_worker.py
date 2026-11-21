@@ -418,3 +418,31 @@ def test_reconstruction_en_parallele(env, db, monkeypatch):
     monkeypatch.setattr(storage, "write", lambda conn, agg: written.append(agg["match"]))
     ok = storage.rebuild(None, None, "rlpi", [f"m{i}" for i in range(7)], 3, lambda k, mid, e: seen.append((k, e)))
     assert ok == 7 and sorted(written) == [f"m{i}" for i in range(7)] and [k for k, _ in seen] == list(range(1, 8))
+
+
+def test_rattrapage_cameras(env, db, monkeypatch):
+    """`backfill-cameras` : les parties traitées avant le cameras.json le reçoivent, lu dans le worker (processus
+    séparé) et plus jamais dans le serveur web. Parties sans replay gardé ou au replay illisible : passées."""
+    _, s3 = env
+    lus = []
+
+    def cameras(replay, dest, timeout=300):
+        lus.append(Path(replay).name)
+        if Path(replay).read_bytes() == b"abime":
+            raise RuntimeError("replay illisible")
+        Path(dest).write_text(json.dumps({"players": {"lu": Path(replay).name}}), encoding="utf-8")
+
+    monkeypatch.setattr(game, "cameras", cameras)
+    for mid in ("m1", "m2", "m3", "m4", "m5"):
+        add_match(db, s3, mid, status="en_attente" if mid == "m4" else "ok")
+        s3.objects[f"games/{mid}/frames/partie/R{mid}.meta.json"] = b"{}"
+    s3.objects["games/m2/frames/partie/Rm2.cameras.json"] = b'{"deja": 1}'  # déjà là
+    del s3.objects["replays/m3.replay"]  # replay non conservé
+    s3.objects["replays/m5.replay"] = b"abime"
+    counts = worker.backfill_cameras()
+    assert counts == {"faites": 1, "deja_la": 1, "sans_replay": 1, "echecs": 1}
+    assert json.loads(s3.objects["games/m1/frames/partie/Rm1.cameras.json"]) == {"players": {"lu": "m1.replay"}}
+    assert s3.objects["games/m2/frames/partie/Rm2.cameras.json"] == b'{"deja": 1}'
+    assert "games/m4/frames/partie/Rm4.cameras.json" not in s3.objects  # partie pas encore traitée
+    assert sorted(lus) == ["m1.replay", "m5.replay"]
+    assert worker.backfill_cameras() == {"faites": 0, "deja_la": 2, "sans_replay": 1, "echecs": 1}  # sans risque

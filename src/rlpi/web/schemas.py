@@ -12,6 +12,7 @@ sachant pas les écrire.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -435,9 +436,8 @@ class Tech(Strict):
 
 class Touch(Strict):
     replay: str
-    match: str | None = Field(default=None, description="Identifiant de la partie (ralenti : POST /api/clips)")
-    i: int | None = Field(default=None, description="Image de la touche à 10 images/s (absente des anciens agrégats)")
     date: str
+    i: int = Field(description="Indice de l'image de la touche dans la partie (10 images/s) : clé pour la revoir")
     clock: Num
     action: str
     kind: str
@@ -466,11 +466,14 @@ class CurveGoal(Strict):
 
 class CurveTouch(Strict):
     k: int
+    i: int = Field(description="Indice de l'image de la touche dans la partie (10 images/s) : clé pour la revoir")
     a: str
     clock: Num
     dv: Num
     va: Num
     vb: Num
+    x: Num = Field(description="Position de la balle à la touche")
+    y: Num
 
 
 class Curve(Strict):
@@ -614,6 +617,63 @@ class Match(Strict):
     indices: list[PerfMatch] = Field(description="Indice de performance du joueur dans ce match (0 ou 1 ligne)")
     pires: list[Touch] = Field(description="Ses touches les plus coûteuses dans ce match")
     meilleures: list[Touch]
+
+
+# ------------------------------------------------------------------------------------------------ clips 3D
+
+
+class ClipXyz(Strict):
+    x: list[int] = Field(description="x à chaque image (unités du jeu, vers la gauche comme dans Rocket League)")
+    y: list[int] = Field(description="y à chaque image (vers le but adverse de l'auteur de la touche)")
+    z: list[int] = Field(description="Hauteur à chaque image")
+
+
+class ClipCar(Strict):
+    name: str
+    kind: Literal["me", "mate1", "mate2", "opp"] = Field(
+        description="me (auteur de la touche), mate1, mate2 (ses coéquipiers) ou opp (adversaire)"
+    )
+    x: list[int]
+    y: list[int]
+    z: list[int]
+    fwd: tuple[list[float], list[float], list[float]] = Field(
+        description="Vecteur unitaire vers l'avant : [x, y, z], une liste par axe"
+    )
+    up: tuple[list[float], list[float], list[float]] = Field(
+        description="Vecteur unitaire vers le haut : [x, y, z], une liste par axe"
+    )
+    boost: list[int] = Field(description="Boost (0 à 100)")
+    jump: list[int] = Field(description="Saut en cours (1) à chaque image")
+    djump: list[int] = Field(description="Double saut en cours (1) à chaque image")
+    dodge: list[int] = Field(description="Dodge en cours (1) à chaque image")
+
+
+class ClipCamSettings(Strict):
+    fov: float | None = Field(default=None, description="Champ de vision horizontal (degrés)")
+    distance: float | None = Field(default=None, description="Distance derrière la voiture (unités du jeu)")
+    height: float | None = Field(default=None, description="Hauteur au-dessus de la voiture (unités du jeu)")
+    angle: float | None = Field(default=None, description="Inclinaison (degrés, négatif : vers le bas)")
+    stiffness: float | None = Field(default=None, description="Raideur (0 : caméra souple, 1 : rigide)")
+
+
+class ClipCam(Strict):
+    """Caméra de l'auteur de la touche, relevée dans le replay (« ta caméra » du player)."""
+
+    settings: ClipCamSettings = Field(description="Réglages relevés (vides : réglages par défaut du jeu)")
+    ballcam: list[int] = Field(description="Caméra balle (1) ou caméra voiture (0) à chaque image")
+
+
+class Clip(Strict):
+    """Clip 3D d'une touche, au format du player 3D (lu par web/src/pov/scene.ts). Positions dans le repère de
+    l'équipe de l'auteur de la touche."""
+
+    id: str = Field(description="« <partie>:<i> »")
+    format: int = Field(description="Format du clip (2 : player 3D)")
+    fps: int = Field(description="Images par seconde (30)")
+    t0: int = Field(description="Image de la touche dans le clip")
+    ball: ClipXyz
+    cars: list[ClipCar]
+    cam: ClipCam | None = Field(default=None, description="Caméra de l'auteur de la touche, si relevée")
 
 
 # ------------------------------------------------------------------------------------------------ modèles

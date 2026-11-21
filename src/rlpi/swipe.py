@@ -25,14 +25,11 @@ import json
 import random
 from pathlib import Path
 
-import numpy as np
 import polars as pl
 
+from rlpi import clips
 from rlpi.config import DATA, FEATURES, FRAMES, ROOT, SOURCE
 
-FPS = 30        # images par seconde du clip livré
-SRC_FPS = 120   # lecture fine du replay pour dater chaque vraie mise à jour
-BEFORE, AFTER = 3.0, 1.0
 MIX = {"perso": .4, "peer": .15, "lobby": .15, "ssl": .15, "rlcs": .15}
 POOL = DATA / "swipe" / "reference_cards.json"
 
@@ -76,100 +73,22 @@ def keep(cards: list[dict], want: dict[str, int]) -> list[dict]:
     return out
 
 
-def resample(pos: np.ndarray, vel: np.ndarray, src_fps: int, out_n: int, out_fps: int) -> tuple[np.ndarray, np.ndarray]:
-    """Les voitures ne sont mises à jour qu'environ 15 fois par seconde dans le replay : entre deux mises à jour,
-    la position reste figée puis saute. On garde les vraies mises à jour (position qui change) et on
-    reconstruit une trajectoire continue entre elles (Hermite cubique avec les vitesses enregistrées)."""
-    keys = [0] + [k for k in range(1, len(pos)) if np.any(pos[k] != pos[k - 1])]
-    kt = np.array(keys) / src_fps
-    kp, kv = pos[keys], vel[keys]
-    out_t = np.arange(out_n) / out_fps
-    P, Vv = np.zeros((out_n, 3)), np.zeros((out_n, 3))
-    for n, t in enumerate(out_t):
-        j = int(np.searchsorted(kt, t, side="right") - 1)
-        if j < 0:
-            P[n], Vv[n] = kp[0], kv[0]; continue
-        if j >= len(kt) - 1:
-            dt = t - kt[-1]; P[n], Vv[n] = kp[-1] + kv[-1] * dt, kv[-1]; continue
-        h = kt[j + 1] - kt[j]; u = (t - kt[j]) / h
-        u2, u3 = u * u, u * u * u
-        P[n] = (2 * u3 - 3 * u2 + 1) * kp[j] + (u3 - 2 * u2 + u) * h * kv[j] + (-2 * u3 + 3 * u2) * kp[j + 1] + (u3 - u2) * h * kv[j + 1]
-        Vv[n] = kv[j] + (kv[j + 1] - kv[j]) * u
-    return P, Vv
-
-
-def resample_dir(vec: np.ndarray, pos: np.ndarray, src_fps: int, out_n: int, out_fps: int) -> np.ndarray:
-    """Même chose pour un vecteur d'orientation : interpolation linéaire normalisée entre vraies mises à jour."""
-    keys = [0] + [k for k in range(1, len(pos)) if np.any(pos[k] != pos[k - 1]) or np.any(vec[k] != vec[k - 1])]
-    kt, kv = np.array(keys) / src_fps, vec[keys]
-    out = np.zeros((out_n, 3))
-    for n, t in enumerate(np.arange(out_n) / out_fps):
-        j = int(np.clip(np.searchsorted(kt, t, side="right") - 1, 0, len(kt) - 1))
-        if j >= len(kt) - 1:
-            out[n] = kv[-1]; continue
-        u = (t - kt[j]) / (kt[j + 1] - kt[j]); v = kv[j] + (kv[j + 1] - kv[j]) * u
-        out[n] = v / (np.linalg.norm(v) or 1)
-    return out
-
-
 def extract(source: str, replay: str, picks: list[dict], frames_dir: Path | None = None,
-            replay_path: str | Path | None = None, before: float = BEFORE, after: float = AFTER) -> list[dict]:
+            replay_path: str | Path | None = None) -> list[dict]:
     """Cartes des touches `picks` d'un replay. `frames_dir` : dossier des images (défaut frames/<source>/ du
-    dossier de données) ; `replay_path` : replay brut (défaut : chemin noté à l'extraction, meta["path"]) ;
-    `before` / `after` : secondes gardées avant et après la touche (ralentis plus longs : rlpi.clips)."""
-    import subtr_actor as sa
-
+    dossier de données) ; `replay_path` : replay brut (défaut : chemin noté à l'extraction, meta["path"]).
+    Touches mal calées dans le replay ou trop près du début ou de la fin : cartes écartées."""
     fd = frames_dir or FRAMES / source
     meta = json.loads((fd / f"{replay}.meta.json").read_text(encoding="utf-8"))
-    f10 = pl.read_parquet(fd / f"{replay}.parquet", columns=["ball_x", "ball_y", "ball_z"])
-    cols, arr = sa.get_ndarray_with_info_from_replay_filepath(
-        str(replay_path or meta["path"]), ["BallRigidBody"], ["PlayerRigidBodyBasis", "PlayerBoost"], fps=SRC_FPS,
-        dtype="f32")
-    a = np.asarray(arr)
-    gh, ph = cols["column_headers"]["global_headers"], cols["column_headers"]["player_headers"]
-    ng, npl = len(gh), len(ph)
-    gi = {h: gh.index(h) for h in gh}
-    bh = next(h for h in ph if "boost" in h.lower())
+    f10 = pl.read_parquet(fd / f"{replay}.parquet", columns=["ball_x", "ball_y"])
+    track = clips.read_replay(replay_path or meta["path"])
     out = []
     for p in picks:
         i10 = p["i"]
-        target = np.array([f10["ball_x"][i10], f10["ball_y"][i10], f10["ball_z"][i10]])
-        r = SRC_FPS // 10
-        lo, hi = max(0, r * i10 - 10 * r), min(len(a), r * i10 + 10 * r)
-        d = np.linalg.norm(a[lo:hi, [gi["Ball - position x"], gi["Ball - position y"], gi["Ball - position z"]]] - target, axis=1)
-        j = lo + int(np.argmin(d))
-        if d.min() > 50:
-            continue  # alignement douteux : carte écartée
-        j0, j1 = j - int(before * SRC_FPS), j + int(after * SRC_FPS) + 1
-        if j0 < 0 or j1 > len(a):
-            continue
-        seg = a[j0:j1]
-        n_out = int((before + after) * FPS) + 1
-        g = lambda name: seg[:, gi[name]]  # noqa: E731
-        pc = lambda k, name: seg[:, ng + k * npl + ph.index(name)]  # noqa: E731
-        xyz = lambda f: np.column_stack([f("x"), f("y"), f("z")])  # noqa: E731
-        cars = []
-        step = SRC_FPS // FPS
-        for pl_ in meta["players"]:
-            k = pl_["slot"]
-            pos = xyz(lambda c: pc(k, f"position {c}")); vel = xyz(lambda c: pc(k, f"linear velocity {c}"))
-            P_, V_ = resample(pos, vel, SRC_FPS, n_out, FPS)
-            fw = resample_dir(xyz(lambda c: pc(k, f"forward {c}")), pos, SRC_FPS, n_out, FPS)
-            up = resample_dir(xyz(lambda c: pc(k, f"up {c}")), pos, SRC_FPS, n_out, FPS)
-            cars.append({
-                "team": pl_["team"], "judged": pl_["id"] == p["player_id"],
-                "pos": np.round(P_).astype(int).tolist(), "vel": np.round(V_).astype(int).tolist(),
-                "fw": np.round(fw, 3).tolist(), "up": np.round(up, 3).tolist(),
-                "boost": np.round(pc(k, bh)[::step][:n_out] / 2.55).astype(int).tolist(),
-            })
-        if not any(c["judged"] for c in cars) or np.isnan(seg[:, :3]).any():
-            continue
-        out.append({
-            "id": f"{source}:{replay}:{i10}", "origin": p["origin"], "action": p["action"],
-            "fps": FPS, "action_frame": int(before * FPS), **dict(zip(("ball", "ball_v"), (lambda bp, bv: (np.round(bp).astype(int).tolist(), np.round(bv).astype(int).tolist()))(
-                *resample(xyz(lambda c: g(f"Ball - position {c}")), xyz(lambda c: g(f"Ball - linear velocity {c}")), SRC_FPS, n_out, FPS)))),
-            "cars": cars,
-        })
+        j = clips.locate(track, i10, (f10["ball_x"][i10], f10["ball_y"][i10]))
+        card = None if j is None else clips.cut(track, meta, j, p["player_id"])
+        if card is not None:
+            out.append({"id": f"{source}:{replay}:{i10}", "origin": p["origin"], "action": p["action"], **card})
     return out
 
 

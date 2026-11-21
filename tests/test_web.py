@@ -21,6 +21,7 @@ from rlpi.web import cache, schemas, sessions
 from rlpi.web.settings import Settings, get_settings
 from tests.payload import aggregates, reference_context
 from tests.test_snapshot import SNAPSHOT, cases, fill_database, normalize
+from tests.test_worker import FakeS3
 
 PUBLIC = "http://testserver"
 ENV = {
@@ -229,8 +230,6 @@ def test_documentation_de_l_api(client):
         "/api/modeles",
         "/api/swipe/deck",
         "/api/swipe/jugements",
-        "/api/clips",
-        "/api/clips/{partie}/{image}",
     ):
         assert p in paths, p
     assert client.get("/docs").status_code == 200
@@ -253,6 +252,66 @@ def test_cache_calcule_une_seule_fois():
     assert len(calls) == 1
     c.compute("b", build), c.compute("c", build)
     assert c.get("a") is None  # le plus ancien est sorti
+
+
+def wait_until(pred, timeout: float = 5.0) -> None:
+    import time
+
+    end = time.monotonic() + timeout
+    while not pred():
+        assert time.monotonic() < end, "attente trop longue"
+        time.sleep(0.01)
+
+
+def test_cache_un_seul_calcul_a_la_fois_meme_apres_un_echec():
+    """Un calcul qui échoue n'est pas gardé : les demandes qui l'attendaient le refont une par une, et une demande
+    arrivée entre-temps attend son tour au lieu de calculer en parallèle (le verrou de la clé n'est retiré que
+    quand plus personne ne l'attend)."""
+    import contextlib
+    import threading
+    import time
+
+    c = cache.JsonCache()
+    guard, gates = threading.Lock(), [threading.Event() for _ in range(3)]
+    running, peak, started = [0], [0], []
+
+    def build(n):
+        def f():
+            with guard:
+                running[0] += 1
+                peak[0] = max(peak[0], running[0])
+                started.append(n)
+            try:
+                gates[n].wait(5)
+                raise RuntimeError("échec")
+            finally:
+                with guard:
+                    running[0] -= 1
+
+        return f
+
+    def ask(n):
+        with contextlib.suppress(RuntimeError):
+            c.compute("k", build(n))
+
+    threads = [threading.Thread(target=ask, args=(n,)) for n in range(3)]
+    try:
+        threads[0].start()
+        wait_until(lambda: started == [0])
+        threads[1].start()
+        time.sleep(0.1)  # la deuxième demande attend le verrou de la clé
+        gates[0].set()
+        wait_until(lambda: len(started) == 2)  # la première a échoué, la deuxième calcule
+        threads[2].start()
+        time.sleep(0.1)  # la troisième arrive pendant ce calcul : elle doit attendre
+        assert started == [0, 1]
+    finally:
+        for g in gates:
+            g.set()
+        for t in threads:
+            t.join(5)
+    assert started == [0, 1, 2] and peak[0] == 1
+    assert len(c.key_locks) == 0  # rien ne reste en mémoire
 
 
 def test_schemas_decrivent_tout_l_instantane():
@@ -584,64 +643,284 @@ def test_swipe_paquet_a_l_aveugle(app_db, tmp_path, monkeypatch):
     assert c.post("/api/swipe/jugements", json={"paquet": did, "carte": card, "verdict": "bof"}).status_code == 422
 
 
-# ------------------------------------------------------------------------------------------------ ralentis
+# ------------------------------------------------------------------------------------------------ clips 3D (Revoir)
+
+CLIP_MATCH = "partie-clip"
+CLIP_KEY = f"replays/{CLIP_MATCH}.replay"
+CLIP_PLAYERS = [{"slot": k, "team": k // 3, "id": ME if k == 4 else f"Steam:{k}"} for k in range(6)]
 
 
-def test_ralenti_d_une_touche(app_db):
-    from psycopg.types.json import Jsonb
+def clip_storage(meta: dict, touches: list[dict], replay: bytes | None = b"replay", cams: dict | None = None) -> FakeS3:
+    """Stockage d'une partie traitée par le worker : meta.json, touch_values et (si donnés) le replay brut et le
+    cameras.json (SYNTH_CAMS par défaut, plus bas)."""
+    import io
 
-    c, r, db = app_db
-    other = "Steam:76561190000000007"
-    with psycopg.connect(db, autocommit=True) as conn:
-        conn.execute(
-            "INSERT INTO matches (id, source, status, replay_key) VALUES ('m1', 'fichier', 'ok', 'replays/m1')"
-        )
-        conn.execute(
-            "INSERT INTO matches (id, source, status, replay_key) VALUES ('m2', 'fichier', 'ok', 'replays/m2')"
-        )
-        conn.execute("INSERT INTO match_players (match_id, player_id, team) VALUES ('m1', %s, 0)", (ME,))
-        conn.execute("INSERT INTO match_players (match_id, player_id, team) VALUES ('m2', %s, 0)", (other,))
-    assert c.get("/api/clips/m1/120").status_code == 401  # connexion nécessaire
-    login(c, ME, db)
-    assert c.get("/api/clips/m1/120").json() == {"statut": "aucun", "erreur": None, "clip": None}
-    assert c.post("/api/clips", json={"partie": "m2", "image": 120}).status_code == 404  # pas une de ses parties
-    assert c.post("/api/clips", json={"partie": "m1", "image": -1}).status_code == 422
-    assert (
-        c.post("/api/clips", json={"partie": "m1", "image": 120}, headers={"Origin": "https://x.example"}).status_code
-        == 403
-    )
-    d = c.post("/api/clips", json={"partie": "m1", "image": 120})
-    assert d.status_code == 202 and d.json() == {"statut": "en_attente"}
-    assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "en_attente"}
-    assert [json.loads(x) for x in r.lrange(store.QUEUE, 0, -1)] == [{"type": "clip", "match": "m1", "player": ME}]
-    # Ce que fait le worker : ralenti prêt
-    clip = {
-        "id": "m1:120",
-        "format": 2,
-        "fps": 30,
-        "t0": 120,
-        "ball": {"x": [], "y": [], "z": []},
-        "cars": [],
-        "cam": None,
+    import polars as pl
+
+    s3 = FakeS3()
+    base = f"games/{CLIP_MATCH}/"
+    s3.objects[f"{base}frames/partie/{meta['replay']}.meta.json"] = json.dumps(meta).encode()
+    s3.objects[f"{base}frames/partie/{meta['replay']}.parquet"] = b"images a 10 Hz"
+    buf = io.BytesIO()
+    schema = {"i": pl.Int64, "player_id": pl.String, "ball_x": pl.Float64, "ball_y": pl.Float64}
+    pl.DataFrame(touches, schema=schema).write_parquet(buf)
+    s3.objects[f"{base}features/touch_values_partie.parquet"] = buf.getvalue()
+    if replay is not None:
+        s3.objects[CLIP_KEY] = replay
+    cams = SYNTH_CAMS if cams is None else cams
+    if cams:
+        s3.objects[f"{base}frames/partie/{meta['replay']}.cameras.json"] = json.dumps(cams).encode()
+    return s3
+
+
+# Caméras relevées dans le replay fictif (10 s à 120 images/s, temps = index / 120) : le joueur connecté passe en
+# caméra voiture à 4,9 s, soit 0,1 s avant la touche i = 50 (image 600 = 5 s).
+SYNTH_CAMS = {
+    "players": {
+        ME: {
+            "settings": {"fov": 105.0, "distance": 250.0, "height": 90.0, "angle": -4.0, "stiffness": 0.4},
+            "ball_cam": [[0.0, 1], [4.9, 0]],
+        }
     }
+}
+
+
+@pytest.fixture
+def synthetic_replay(monkeypatch):
+    """Replay remplacé par la partie fictive de test_clips (balle en x = 10 × image, y = 500) : la touche i = 50
+    (10 Hz) est à l'image 600 (120 Hz), balle en (6000, 500). Le joueur connecté (slot 4) est dans l'équipe 1 : la
+    balle notée dans touch_values est dans le repère de son équipe, (−6000, −500)."""
+    from rlpi import clips as rclips
+    from tests.test_clips import synthetic
+
+    monkeypatch.setattr(rclips, "read_replay", lambda path, fps=120: synthetic())
+
+    def no_cameras(path):
+        raise AssertionError("le serveur web ne lit jamais les caméras dans le replay (rattrapage : worker)")
+
+    monkeypatch.setattr(rclips, "read_cameras", no_cameras)
+    meta = {"replay": CLIP_MATCH, "players": CLIP_PLAYERS}
+    touches = [
+        {"i": 50, "player_id": ME, "ball_x": -6000.0, "ball_y": -500.0},
+        {"i": 50, "player_id": "Steam:0", "ball_x": 6000.0, "ball_y": 500.0},  # même image, autre joueur
+        {"i": 60, "player_id": "Steam:1", "ball_x": 7200.0, "ball_y": 500.0},
+        {"i": 70, "player_id": ME, "ball_x": 0.0, "ball_y": 0.0},  # balle loin de la position notée
+        {"i": 98, "player_id": ME, "ball_x": -11760.0, "ball_y": -500.0},  # moins d'1 s avant la fin
+    ]
+    return meta, touches
+
+
+def judged(body: dict) -> list[bool]:
+    return [c["kind"] == "me" for c in body["cars"]]
+
+
+def ball_at(body: dict, k: int) -> list[int]:
+    return [body["ball"][c][k] for c in "xyz"]
+
+
+def test_clip_service_partie_fictive(synthetic_replay):
+    from rlpi.web import clips as wclips
+
+    meta, touches = synthetic_replay
+    svc = wclips.ClipService(s3=clip_storage(meta, touches), bucket="b")
+    body = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, 50, ME)))
+    schemas.Clip.model_validate(body)
+    assert body["id"] == f"{CLIP_MATCH}:50" and body["fps"] == 30 and body["t0"] == 120 and body["format"] == 2
+    # balle en (6000, 500) sur le terrain ; le joueur connecté est dans l'équipe 1 : x et y retournés
+    assert ball_at(body, 120) == [-6000, -500, 93]
+    assert judged(body) == [k == 4 for k in range(6)]  # deux touches dans l'image : celle du joueur connecté
+    assert [c["kind"] for c in body["cars"]] == ["opp", "opp", "opp", "mate1", "me", "mate2"]
+    other = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, 50, "Steam:0")))
+    assert judged(other) == [k == 0 for k in range(6)] and ball_at(other, 120) == [6000, 500, 93]  # équipe 0
+    mate = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, 60, ME)))
+    assert judged(mate) == [k == 1 for k in range(6)]  # touche d'un autre : son auteur est mis en avant
+    assert svc.replay_reads == 1  # la dernière partie lue reste en mémoire
+    cam = body["cam"]  # caméra du joueur connecté : réglages relevés, caméra voiture 0,1 s avant la touche
+    assert cam["settings"]["fov"] == 105.0 and len(cam["ballcam"]) == len(body["ball"]["x"])
+    assert cam["ballcam"][116] == 1 and cam["ballcam"][118] == 0 and cam["ballcam"][120] == 0
+    assert other["cam"] is None  # pas de caméra relevée pour ce joueur
+    for i, status in ((70, 422), (98, 422), (51, 404)):
+        with pytest.raises(wclips.ClipError) as e:
+            svc.clip(CLIP_MATCH, CLIP_KEY, i, ME)
+        assert e.value.status == status, i
+
+
+def test_clip_service_sans_cameras(synthetic_replay, monkeypatch):
+    """Partie analysée avant le cameras.json (rattrapage pas encore passé) : clip sans caméra, le replay n'est lu
+    qu'une fois (pas de lecture des caméras, environ 250 Mo, dans le serveur web)."""
+    from rlpi import clips as rclips
+    from rlpi.web import clips as wclips
+
+    meta, touches = synthetic_replay
+    lus = []
+    monkeypatch.setattr(rclips, "read_cameras", lambda path: lus.append(path) or SYNTH_CAMS)
+    s3 = clip_storage(meta, touches, cams={})
+    svc = wclips.ClipService(s3=s3, bucket="b")
+    body = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, 50, ME)))
+    assert body["cam"] is None and svc.replay_reads == 1 and lus == []
+    assert not any(k.endswith(".cameras.json") for k in s3.objects)
+
+
+def test_clip_service_partie_reanalysee(synthetic_replay):
+    """Une nouvelle version de la partie (matches.updated_at) relit le replay et change l'ETag ; l'ETag dépend aussi
+    du joueur connecté (sa touche est préférée dans une image partagée)."""
+    from rlpi.web import clips as wclips
+
+    meta, touches = synthetic_replay
+    svc = wclips.ClipService(s3=clip_storage(meta, touches), bucket="b")
+    svc.clip(CLIP_MATCH, CLIP_KEY, 50, ME, "v1")
+    svc.clip(CLIP_MATCH, CLIP_KEY, 50, ME, "v1")
+    assert svc.replay_reads == 1
+    svc.clip(CLIP_MATCH, CLIP_KEY, 50, ME, "v2")  # partie réanalysée : ni la partie ni le clip gardés ne servent
+    assert svc.replay_reads == 2 and svc.last is not None and svc.last.version == "v2"
+    tags = {wclips.tag(CLIP_MATCH, v, 50, who) for v in ("v1", "v2") for who in (ME, "Steam:0")}
+    assert len(tags) == 4
+
+
+def test_clip_service_async_clip_garde_servi_pendant_une_lecture(synthetic_replay, monkeypatch):
+    """Route asynchrone : un clip déjà gardé est servi tout de suite, même quand toutes les places de lecture sont
+    prises ; les demandes en trop attendent leur place sans occuper de thread."""
+    import threading
+
+    import anyio
+
+    from rlpi import clips as rclips
+    from rlpi.web import clips as wclips
+    from tests.test_clips import synthetic
+
+    meta, touches = synthetic_replay
+    svc = wclips.ClipService(max_reads=1, s3=clip_storage(meta, touches), bucket="b")
+    first = svc.clip(CLIP_MATCH, CLIP_KEY, 50, ME, "v1")
+    gate, reading = threading.Event(), threading.Event()
+
+    def slow(path, fps=120):
+        reading.set()
+        gate.wait(5)
+        return synthetic()
+
+    monkeypatch.setattr(rclips, "read_replay", slow)
+
+    async def main():
+        try:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(svc.aclip, CLIP_MATCH, CLIP_KEY, 50, ME, "v2")  # partie réanalysée : lecture lente
+                tg.start_soon(svc.aclip, CLIP_MATCH, CLIP_KEY, 60, ME, "v3")  # pas de place : attend
+                await anyio.to_thread.run_sync(reading.wait, 5)
+                await anyio.sleep(0.05)
+                with anyio.fail_after(1):
+                    assert await svc.aclip(CLIP_MATCH, CLIP_KEY, 50, ME, "v1") == first
+                stats = svc.limiter.statistics()
+                assert stats.borrowed_tokens == 1 and stats.tasks_waiting == 1
+                gate.set()
+        finally:
+            gate.set()
+
+    anyio.run(main)
+    assert svc.replay_reads == 3
+
+
+def test_clip_service_stockage_incomplet(synthetic_replay):
+    from rlpi.web import clips as wclips
+
+    meta, touches = synthetic_replay
+    svc = wclips.ClipService(s3=clip_storage(meta, touches, replay=None), bucket="b")
+    with pytest.raises(wclips.ClipError) as e:
+        svc.clip(CLIP_MATCH, CLIP_KEY, 51, ME)  # touche inconnue : le replay n'est pas demandé
+    assert e.value is wclips.TOUCH_UNKNOWN
+    with pytest.raises(wclips.ClipError) as e:
+        svc.clip(CLIP_MATCH, CLIP_KEY, 50, ME)
+    assert e.value is wclips.REPLAY_MISSING and svc.replay_reads == 0
+    with pytest.raises(wclips.ClipError) as e:
+        wclips.ClipService(s3=FakeS3(), bucket="b").clip("autre", "replays/autre.replay", 50, ME)
+    assert e.value is wclips.GAME_MISSING
+
+
+def test_clip_vrai_replay(tmp_path):
+    """Sur un vrai replay de data/raw/ (sauté s'il n'y en a pas) : chaque touche notée donne un clip calé."""
+    import polars as pl
+
+    from rlpi import frames
+    from rlpi.web import clips as wclips
+    from tests.test_clips import RAW
+
+    if not RAW:
+        pytest.skip("aucun replay dans data/raw/")
+    frames.extract(str(RAW[0]), str(tmp_path))
+    rid = RAW[0].stem
+    meta = json.loads((tmp_path / f"{rid}.meta.json").read_text(encoding="utf-8"))
+    by_slot = {p["slot"]: p for p in meta["players"]}
+    f10 = pl.read_parquet(tmp_path / f"{rid}.parquet", columns=["ball_x", "ball_y"])
+    picks = pl.read_parquet(tmp_path / f"{rid}.touches.parquet").filter(
+        (pl.col("slot") >= 0) & (pl.col("i") >= 40) & (pl.col("i") < f10.height - 20)
+    )
+    touches = []
+    for i, s in picks.select("i", "slot").unique("i", keep="first", maintain_order=True).head(8).iter_rows():
+        sgn = 1 if by_slot[s]["team"] == 0 else -1  # touch_values : repère de l'équipe du toucheur
+        bx, by = f10["ball_x"][i], f10["ball_y"][i]
+        touches.append({"i": i, "player_id": by_slot[s]["id"], "ball_x": sgn * bx, "ball_y": sgn * by})
+    svc = wclips.ClipService(s3=clip_storage(meta, touches, RAW[0].read_bytes()), bucket="b")
+    for t in touches:
+        body = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, t["i"], ME)))
+        schemas.Clip.model_validate(body)
+        assert judged(body).count(True) == 1
+        bx, by, _ = ball_at(body, body["t0"])  # repère de l'équipe de l'auteur, comme touch_values
+        assert abs(bx - t["ball_x"]) < 60 and abs(by - t["ball_y"]) < 60
+    assert svc.replay_reads == 1
+
+
+def test_clip_sans_session(client):
+    assert client.get(f"/api/joueurs/{ME}/matchs/{CLIP_MATCH}/clips/50").status_code == 401
+
+
+@pytest.fixture
+def clip_app(app_db, synthetic_replay, monkeypatch):
+    from rlpi.web import clips as wclips
+    from rlpi.web.routes import api
+
+    c, _, db = app_db
+    meta, touches = synthetic_replay
+    svc = wclips.ClipService(s3=clip_storage(meta, touches), bucket="b")
+    monkeypatch.setattr(api, "CLIPS", svc)
     with psycopg.connect(db, autocommit=True) as conn:
-        conn.execute("UPDATE clips SET status = 'pret', clip = %s WHERE match_id = 'm1'", (Jsonb(clip),))
-    got = c.get("/api/clips/m1/120")
-    assert got.json() == {"statut": "pret", "erreur": None, "clip": clip} and "max-age" in got.headers["cache-control"]
-    assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "pret"}
-    assert r.llen(store.QUEUE) == 1  # rien de plus à fabriquer
-    # Un ralenti d'un ancien format (vue du swipe) est considéré comme absent et refait
-    with psycopg.connect(db, autocommit=True) as conn:
-        conn.execute("UPDATE clips SET clip = %s WHERE match_id = 'm1'", (Jsonb({"id": "m1:120", "fps": 30}),))
-    assert c.get("/api/clips/m1/120").json()["statut"] == "aucun"
-    assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "en_attente"}
-    assert r.llen(store.QUEUE) == 2
-    # Un ralenti en erreur est redemandé
-    with psycopg.connect(db, autocommit=True) as conn:
-        conn.execute("UPDATE clips SET status = 'erreur', error = 'x', clip = NULL WHERE match_id = 'm1'")
-    assert c.get("/api/clips/m1/120").json()["statut"] == "erreur"
-    assert c.post("/api/clips", json={"partie": "m1", "image": 120}).json() == {"statut": "en_attente"}
-    assert r.llen(store.QUEUE) == 3
-    # Les ralentis d'un autre joueur ne se lisent pas
-    login(c, other, db)
-    assert c.get("/api/clips/m1/120").json()["statut"] == "aucun"
+        conn.execute(
+            "INSERT INTO matches (id, source, status, replay_key) VALUES (%s, 'fichier', 'ok', %s)",
+            (CLIP_MATCH, CLIP_KEY),
+        )
+        conn.execute("INSERT INTO matches (id, source, status) VALUES ('partie-autre', 'fichier', 'ok')")
+        conn.execute("INSERT INTO match_players VALUES (%s, %s, 'Moi', 1)", (CLIP_MATCH, ME))
+        conn.execute("INSERT INTO match_players VALUES ('partie-autre', 'Steam:0', 'Autre', 0)")
+    login(c, ME, db)
+    return c, svc, db
+
+
+def test_clip_api(clip_app):
+    c, svc, db = clip_app
+    url = f"/api/joueurs/{ME}/matchs/{CLIP_MATCH}/clips"
+    r = c.get(f"{url}/50", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.headers["content-encoding"] == "gzip"
+    assert r.headers["cache-control"] == "private, max-age=86400" and r.headers["etag"].startswith('"clip-')
+    body = r.json()
+    schemas.Clip.model_validate(body)
+    assert body["id"] == f"{CLIP_MATCH}:50" and ball_at(body, body["t0"]) == [-6000, -500, 93]
+    assert c.get(f"{url}/50", headers={"If-None-Match": r.headers["etag"]}).status_code == 304
+    assert c.get(f"{url}/60").status_code == 200 and svc.replay_reads == 1  # même partie : replay gardé
+    svc.last = None  # partie oubliée : le clip déjà fait vient du cache des clips, sans relire le replay
+    assert c.get(f"{url}/50").json() == body and svc.replay_reads == 1
+    assert c.get("/api/joueurs/Steam:0/matchs/partie-autre/clips/50").status_code == 403
+    assert c.get(f"/api/joueurs/{ME}/matchs/partie-autre/clips/50").status_code == 404  # pas sa partie
+    assert c.get(f"/api/joueurs/{ME}/matchs/inconnue/clips/50").status_code == 404
+    with psycopg.connect(db, autocommit=True) as conn:  # partie réanalysée : nouvel ETag, replay relu
+        conn.execute("UPDATE matches SET updated_at = now() + interval '1 second' WHERE id = %s", (CLIP_MATCH,))
+    r2 = c.get(f"{url}/50", headers={"If-None-Match": r.headers["etag"]})
+    assert r2.status_code == 200 and r2.headers["etag"] != r.headers["etag"] and svc.replay_reads == 2
+    r = c.get(f"{url}/51")
+    assert r.status_code == 404 and r.json()["detail"] == "Touche inconnue dans cette partie."
+    r = c.get(f"{url}/70")
+    assert r.status_code == 422 and r.json()["detail"] == "Impossible de retrouver cette touche dans le replay."
+    assert c.get(f"{url}/-1").status_code == 422
+    with psycopg.connect(db, autocommit=True) as conn:  # replay supprimé (RLPI_KEEP_REPLAYS=0)
+        conn.execute("UPDATE matches SET replay_key = 'replays/efface.replay' WHERE id = %s", (CLIP_MATCH,))
+    svc.last = None
+    svc.clips.mem.clear()
+    r = c.get(f"{url}/50")
+    assert r.status_code == 404 and r.json()["detail"] == "Replay non conservé pour cette partie."

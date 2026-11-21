@@ -48,7 +48,7 @@ h1, h2, h3, h4, p { margin: 0; font-weight: inherit; font-size: inherit; }
 .scope--m { color: var(--accent-ink, var(--accent)); }
 .scope--e { color: var(--ink-muted); border-style: dashed; }
 .pl-panel .scope--p, .pl-panel .scope--e { color: var(--panel-muted); }
-.costs .pl-row { cursor: pointer; }
+.costs .pl-row .dv { margin-left: auto; font-weight: 800; }
 .mjlist a { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: var(--space-3); align-items: baseline; padding: 8px 0;
   border-bottom: 1px solid var(--rule); color: inherit; text-decoration: none; }
 .mjlist a:hover b { text-decoration: underline; }
@@ -135,15 +135,12 @@ svg text { font-family: var(--font-sans); font-size: var(--fs-axis); font-weight
 .fiche .clk { font-size: var(--dx-22); }
 .fiche .kind { font-size: var(--fs-title); margin-top: 6px; }
 .fiche .cost { font-size: var(--fs-score); color: var(--bad-ink); margin-top: 2px; }
-.fiche .open { margin-top: var(--space-2); text-decoration: underline; text-underline-offset: 3px; align-self: flex-start; }
+.fiche .acts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin-top: var(--space-2); }
+.fiche .open { text-decoration: underline; text-underline-offset: 3px; }
 .others .pl-row { display: grid; grid-template-columns: 32px 70px 60px minmax(0, 1fr) 90px 70px; gap: var(--space-3); width: 100%; text-align: left; }
 .others .pl-row:hover { background: var(--surface-alt); }
-.fiche .acts { display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: baseline; }
-.fiche .acts .open { align-self: auto; }
-.fiche .replay { font-weight: 800; }
-.others .rrow { display: flex; align-items: center; gap: var(--space-2); }
-.others .rrow .pl-row { flex: 1; min-width: 0; }
-.others .rrow .replay { flex: none; padding: 4px 10px; }
+.others .orow { display: flex; align-items: center; gap: var(--space-2); border-bottom: 1px solid var(--rule); }
+.others .orow > .pl-row { flex: 1; min-width: 0; border-bottom: 0; }
 .gainrow { display: grid; grid-template-columns: minmax(110px, 170px) minmax(0, 1fr) 70px; gap: var(--space-3); align-items: center; padding: 6px 0; border-bottom: 1px solid var(--rule); }
 .gainrow .vl { font-size: var(--dx-26); text-align: right; }
 .legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); align-items: center; margin-top: var(--space-2); }
@@ -379,4 +376,27 @@ footer { margin-top: var(--space-12); }
   .vote.bad { grid-column: 1; grid-row: 2; } .vote.maybe { grid-column: 2; grid-row: 2; } .vote.good { grid-column: 3; grid-row: 2; }
   .vote { width: 76px; height: 76px; } .vote.maybe { width: 76px; height: 76px; flex-direction: column; padding: 0; }
   .card .ask { display: none; }
+}
+
+/* --- Revoir une touche en 3D (fenêtre modale, lecteur du Swipe) --------------- */
+.rv { padding: 3px 8px; border: 1.5px solid currentColor; white-space: nowrap; flex: none; }
+.rv:hover, .rv:focus-visible { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.pl-panel .rv:hover, .pl-panel .rv:focus-visible { background: var(--panel-ink); color: var(--panel); border-color: var(--panel-ink); }
+.replay { padding: 0; border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+  width: min(1240px, calc(100vw - 32px)); height: min(860px, calc(100dvh - 32px)); max-width: none; max-height: none; }
+.replay::backdrop { background: color-mix(in srgb, var(--surface) 88%, transparent); }
+.replay .rbox { display: flex; flex-direction: column; height: 100%; }
+.replay .rh { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--rule); }
+.replay .rh h2 { font-size: var(--fs-title); }
+.replay .close { margin-left: auto; font-weight: 800; padding: var(--space-1) var(--space-2); background: var(--surface-alt); }
+.replay .rpov { position: relative; flex: 1; min-height: 0; overflow: auto; padding: var(--space-3); background: #0b0d11; color: #f3f3ee; }
+.replay .state { min-height: 240px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2);
+  text-align: center; padding: var(--space-4); }
+.replay .state .note-dark { color: #9aa1ab; }
+.replay .note { padding: var(--space-2) var(--space-4) var(--space-3); }
+@media (max-width: 720px) {
+  .replay { inset: 0 auto auto 0; margin: 0; width: 100vw; height: 100dvh; border: 0; }
+  .replay .rh { padding: var(--space-2) var(--space-3); }
+  .replay .rpov { padding: var(--space-2); }
+  .others .orow .rv { padding: 3px 6px; }
 }

@@ -132,3 +132,13 @@ web ; les workers attendent la version 7. Aucune variable obligatoire nouvelle.
 | ☐ | Workers (journaux) | `fin de partie` porte maintenant la durée de chaque étape (`t_replay`, `t_analyse`, `t_envoi`, `t_agregats`, détail dans `etapes`) ; la ligne `état` ajoute `parties_1h`, `duree_moy_s_1h` et `lettre_morte`. | Après la fusion |
 | ☐ | Workers | Contrôle : `docker exec <conteneur worker> python -m rlpi.worker dead` → « 0 tâche(s) en attente » (les parties déjà en erreur avant la fusion n'y figurent pas ; `python -m rlpi.worker status` les liste toujours). | Après la fusion |
 | ☐ | Workers (facultatif) | `RLPI_S3_PARALLEL` (défaut 8) : fichiers d'une partie téléchargés en même temps depuis Garage. Rien à changer. | — |
+
+## Revoir une action en 3D (branche `feature/visualisation-actions-a-travailler`)
+
+Aucune variable nouvelle, aucune migration. Les parties traitées après la fusion ont leur fichier caméras (vue
+joueur du bouton « ▶ Revoir ») ; les plus anciennes le reçoivent avec la commande ci-dessous. Avant qu'elle passe,
+leurs clips s'affichent quand même, avec les réglages caméra par défaut du jeu.
+
+| Fait | Ressource | Réglage | Quand |
+|---|---|---|---|
+| ☐ | Workers | Rattrapage des caméras : `docker exec <conteneur worker> python -m rlpi.worker backfill-cameras`. Une partie à la fois, 2 à 4 s et environ 250 Mo chacune (dans un processus séparé, rendus à la fin), dans la mémoire du worker et jamais dans celle du serveur web. Se termine par `caméras : N déposée(s), … déjà là, … sans replay, … échec(s)`. Sans risque à relancer. | Après la fusion, une fois |

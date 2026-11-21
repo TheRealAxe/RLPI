@@ -4,40 +4,6 @@
  */
 
 export interface paths {
-    "/api/clips": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Demander le ralenti d'une de ses touches */
-        post: operations["ask_api_clips_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/clips/{partie}/{image}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** État du ralenti, et le ralenti quand il est prêt */
-        get: operations["read_api_clips__partie___image__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/joueurs/{id}/matchs/{match}": {
         parameters: {
             query?: never;
@@ -47,6 +13,26 @@ export interface paths {
         };
         /** Détail d'un match du joueur (onglet « Ce match ») */
         get: operations["match_api_joueurs__id__matchs__match__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/joueurs/{id}/matchs/{match}/clips/{i}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Clip 3D d'une touche (4 s avant, 2 s après, 30 images/s), découpé dans le replay
+         * @description Le replay brut est lu au premier clic sur un match (moins d'une seconde) ; les clips suivants du même match et les clips déjà vus sont servis depuis la mémoire.
+         */
+        get: operations["clip_api_joueurs__id__matchs__match__clips__i__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -356,6 +342,152 @@ export interface components {
             /** Sert */
             sert: number | null;
         };
+        /**
+         * Clip
+         * @description Clip 3D d'une touche, au format du player 3D (lu par web/src/pov/scene.ts). Positions dans le repère de
+         *     l'équipe de l'auteur de la touche.
+         */
+        Clip: {
+            ball: components["schemas"]["ClipXyz"];
+            /** @description Caméra de l'auteur de la touche, si relevée */
+            cam?: components["schemas"]["ClipCam"] | null;
+            /** Cars */
+            cars: components["schemas"]["ClipCar"][];
+            /**
+             * Format
+             * @description Format du clip (2 : player 3D)
+             */
+            format: number;
+            /**
+             * Fps
+             * @description Images par seconde (30)
+             */
+            fps: number;
+            /**
+             * Id
+             * @description « <partie>:<i> »
+             */
+            id: string;
+            /**
+             * T0
+             * @description Image de la touche dans le clip
+             */
+            t0: number;
+        };
+        /**
+         * ClipCam
+         * @description Caméra de l'auteur de la touche, relevée dans le replay (« ta caméra » du player).
+         */
+        ClipCam: {
+            /**
+             * Ballcam
+             * @description Caméra balle (1) ou caméra voiture (0) à chaque image
+             */
+            ballcam: number[];
+            /** @description Réglages relevés (vides : réglages par défaut du jeu) */
+            settings: components["schemas"]["ClipCamSettings"];
+        };
+        /** ClipCamSettings */
+        ClipCamSettings: {
+            /**
+             * Angle
+             * @description Inclinaison (degrés, négatif : vers le bas)
+             */
+            angle?: number | null;
+            /**
+             * Distance
+             * @description Distance derrière la voiture (unités du jeu)
+             */
+            distance?: number | null;
+            /**
+             * Fov
+             * @description Champ de vision horizontal (degrés)
+             */
+            fov?: number | null;
+            /**
+             * Height
+             * @description Hauteur au-dessus de la voiture (unités du jeu)
+             */
+            height?: number | null;
+            /**
+             * Stiffness
+             * @description Raideur (0 : caméra souple, 1 : rigide)
+             */
+            stiffness?: number | null;
+        };
+        /** ClipCar */
+        ClipCar: {
+            /**
+             * Boost
+             * @description Boost (0 à 100)
+             */
+            boost: number[];
+            /**
+             * Djump
+             * @description Double saut en cours (1) à chaque image
+             */
+            djump: number[];
+            /**
+             * Dodge
+             * @description Dodge en cours (1) à chaque image
+             */
+            dodge: number[];
+            /**
+             * Fwd
+             * @description Vecteur unitaire vers l'avant : [x, y, z], une liste par axe
+             */
+            fwd: [
+                number[],
+                number[],
+                number[]
+            ];
+            /**
+             * Jump
+             * @description Saut en cours (1) à chaque image
+             */
+            jump: number[];
+            /**
+             * Kind
+             * @description me (auteur de la touche), mate1, mate2 (ses coéquipiers) ou opp (adversaire)
+             * @enum {string}
+             */
+            kind: "me" | "mate1" | "mate2" | "opp";
+            /** Name */
+            name: string;
+            /**
+             * Up
+             * @description Vecteur unitaire vers le haut : [x, y, z], une liste par axe
+             */
+            up: [
+                number[],
+                number[],
+                number[]
+            ];
+            /** X */
+            x: number[];
+            /** Y */
+            y: number[];
+            /** Z */
+            z: number[];
+        };
+        /** ClipXyz */
+        ClipXyz: {
+            /**
+             * X
+             * @description x à chaque image (unités du jeu, vers la gauche comme dans Rocket League)
+             */
+            x: number[];
+            /**
+             * Y
+             * @description y à chaque image (vers le but adverse de l'auteur de la touche)
+             */
+            y: number[];
+            /**
+             * Z
+             * @description Hauteur à chaque image
+             */
+            z: number[];
+        };
         /** Compo */
         Compo: {
             /** Key */
@@ -457,12 +589,24 @@ export interface components {
             clock: number | null;
             /** Dv */
             dv: number | null;
+            /**
+             * I
+             * @description Indice de l'image de la touche dans la partie (10 images/s) : clé pour la revoir
+             */
+            i: number;
             /** K */
             k: number;
             /** Va */
             va: number | null;
             /** Vb */
             vb: number | null;
+            /**
+             * X
+             * @description Position de la balle à la touche
+             */
+            x: number | null;
+            /** Y */
+            y: number | null;
         };
         /** DecInfo */
         DecInfo: {
@@ -490,27 +634,6 @@ export interface components {
              * @constant
              */
             statut: "en_attente";
-        };
-        /** DemandeRalenti */
-        DemandeRalenti: {
-            /**
-             * Image
-             * @description Image de la touche à 10 images/s (champ `i` d'une touche)
-             */
-            image: number;
-            /**
-             * Partie
-             * @description Identifiant de la partie (champ `match` d'une touche)
-             */
-            partie: string;
-        };
-        /** EtatRalenti */
-        EtatRalenti: {
-            /**
-             * Statut
-             * @enum {string}
-             */
-            statut: "aucun" | "en_attente" | "pret" | "erreur";
         };
         /**
          * Fiche
@@ -1152,23 +1275,6 @@ export interface components {
                 [key: string]: number | null;
             };
         };
-        /** Ralenti */
-        Ralenti: {
-            /**
-             * Clip
-             * @description Ralenti (même format qu'une carte du swipe : balle et 6 voitures à 30 images/s, `action_frame` = image de la touche, voiture `judged` = le joueur) ; présent quand le statut est « pret »
-             */
-            clip?: {
-                [key: string]: unknown;
-            } | null;
-            /** Erreur */
-            erreur?: string | null;
-            /**
-             * Statut
-             * @enum {string}
-             */
-            statut: "aucun" | "en_attente" | "pret" | "erreur";
-        };
         /** Record */
         Record: {
             /**
@@ -1457,16 +1563,11 @@ export interface components {
             dv: number | null;
             /**
              * I
-             * @description Image de la touche à 10 images/s (absente des anciens agrégats)
+             * @description Indice de l'image de la touche dans la partie (10 images/s) : clé pour la revoir
              */
-            i?: number | null;
+            i: number;
             /** Kind */
             kind: string;
-            /**
-             * Match
-             * @description Identifiant de la partie (ralenti : POST /api/clips)
-             */
-            match?: string | null;
             /** Replay */
             replay: string;
             /** Role */
@@ -1611,71 +1712,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    ask_api_clips_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DemandeRalenti"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EtatRalenti"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    read_api_clips__partie___image__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                partie: string;
-                image: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Ralenti"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     match_api_joueurs__id__matchs__match__get: {
         parameters: {
             query?: never;
@@ -1733,6 +1769,66 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    clip_api_joueurs__id__matchs__match__clips__i__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                match: string;
+                /** @description Indice de l'image de la touche (10 images/s) */
+                i: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Clip"];
+                };
+            };
+            /** @description Inchangé depuis la version du navigateur (en-tête If-None-Match) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Pas de session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Joueur différent du joueur connecté */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Partie inconnue (ou pas la sienne), touche inconnue, ou replay non conservé */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Touche impossible à retrouver dans le replay, ou trop près de son début ou de sa fin */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

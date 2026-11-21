@@ -8,8 +8,6 @@ Tâches de la file Redis (voir rlpi.store) :
     {"type": "aggregate", "match": <id>}  (re)calculer les agrégats du tableau de bord d'une partie déjà traitée,
                                        à partir de games/<id>/ (rlpi.dashboard.storage)
     {"type": "swipe", "deck": <id>}    fabriquer un paquet de cartes à juger demandé sur le site (rlpi.swipe_online)
-    {"type": "clip", "match": <id>, "player": <id>}  découper les ralentis demandés de ce joueur dans cette partie
-                                       (« Revoir » dans « À travailler », rlpi.clips)
 
 Après chaque partie traitée, le worker calcule ses agrégats (rlpi.dashboard.aggregate) et les écrit dans Postgres :
 le serveur n'a plus qu'à les lire. Cinq minutes après son démarrage (RLPI_BACKFILL_DELAY), puis une fois par heure,
@@ -40,6 +38,8 @@ Commandes (dans le conteneur du worker, ou via `docker exec <conteneur> …`) :
     python -m rlpi.worker rebuild-aggregates [--all]  # agrégats manquants (ou tous) remis en file
     python -m rlpi.worker rebuild-aggregates --here [--parallel 3]   # … ou calculés tout de suite ici,
                                                       # 3 parties à la fois (téléchargements Garage en parallèle)
+    python -m rlpi.worker backfill-cameras            # cameras.json (vue joueur de « ▶ Revoir ») des parties
+                                                      # traitées avant lui, une à la fois, processus séparé
 
 Variables d'environnement :
     REDIS_URL, DATABASE_URL                       URL internes données par Coolify
@@ -417,18 +417,6 @@ class Worker:
         except Exception as e:  # noqa: BLE001
             log("paquet swipe : échec", "error", paquet=deck_id, erreur=f"{type(e).__name__}: {e}"[:500])
 
-    def process_clip(self, match_id: str, player: str) -> None:
-        """Ralentis demandés sur le site (voir rlpi.clips). Pas de nouvel essai : le joueur voit l'erreur et peut
-        redemander."""
-        from rlpi import clips
-
-        t = time.time()
-        try:
-            n = clips.build(self.conn, self.s3, self.bucket, match_id, player, log)
-            log("ralentis prêts", match=match_id, ralentis=n, duree_s=round(time.time() - t))
-        except Exception as e:  # noqa: BLE001
-            log("ralentis : échec", "error", match=match_id, erreur=f"{type(e).__name__}: {e}"[:500])
-
     def backfill(self) -> None:
         """Met en file les parties sans agrégats à jour (un seul worker, une fois par heure et par version), sauf
         celles dont le calcul de cette version attend en lettre morte (relancer avec `retry`)."""
@@ -484,8 +472,8 @@ class Worker:
             self.process_aggregate(task["match"], raw)
         elif task.get("type") == "swipe":
             self.process_swipe(int(task["deck"]))
-        elif task.get("type") == "clip":
-            self.process_clip(str(task["match"]), str(task["player"]))
+        elif task.get("type") == "clip":  # ancienne tâche des ralentis en base (V9), remplacée par rlpi.web.clips
+            log("tâche clip ignorée (ralentis désormais faits par l'API)", match=task.get("match"))
         else:
             self.bury("inconnue", None, raw, f"type de tâche inconnu : {task.get('type')!r}")
 
@@ -682,6 +670,57 @@ def rebuild_aggregates(everything: bool, here: bool, parallel: int = 3) -> None:
     log(f"reconstruction : {ok}/{len(ids)} partie(s) en {time.time() - t0:.1f} s ({parallel} à la fois)")
 
 
+def backfill_cameras() -> dict[str, int]:
+    """Dépose le `<replay>.cameras.json` des parties traitées avant lui (vue joueur du bouton « ▶ Revoir »).
+
+    Une partie à la fois, chaque lecture (environ 250 Mo) dans un processus séparé (rlpi.game.cameras) : le serveur
+    web ne lit jamais les caméras lui-même. Sans risque à relancer : les parties qui l'ont déjà sont passées, comme
+    celles dont le replay n'est plus gardé (RLPI_KEEP_REPLAYS=0)."""
+    from rlpi import game
+    from rlpi.web.clips import is_missing
+
+    conn, cli, b = store.connect(), store.s3(), store.bucket()
+    rows = conn.execute("SELECT id, replay_key FROM matches WHERE status IN ('ok', 'partiel') ORDER BY id").fetchall()
+    counts = {"faites": 0, "deja_la": 0, "sans_replay": 0, "echecs": 0}
+    t0 = time.time()
+    for k, (mid, key) in enumerate(rows, 1):
+        if k % 10 == 0:
+            log(f"caméras : {k}/{len(rows)} parties vues ({time.time() - t0:.0f} s)")
+        prefix = f"games/{mid}/frames/{game.GAME_SOURCE}/"
+        keys = {o["Key"] for page in cli.get_paginator("list_objects_v2").paginate(Bucket=b, Prefix=prefix)
+                for o in page.get("Contents", [])}
+        metas = [x for x in keys if x.endswith(".meta.json")]
+        if len(metas) != 1:
+            continue  # partie sans données dans le stockage : rien à compléter
+        dest = metas[0].removesuffix(".meta.json") + ".cameras.json"
+        if dest in keys:
+            counts["deja_la"] += 1
+            continue
+        tmp = Path(tempfile.mkdtemp(prefix="rlpi_cam_"))
+        try:
+            local = tmp / f"{mid}.replay"
+            try:
+                cli.download_file(b, key or f"replays/{mid}.replay", str(local))
+            except Exception as e:  # noqa: BLE001
+                if not is_missing(e):
+                    raise
+                counts["sans_replay"] += 1
+                continue
+            try:
+                game.cameras(local, tmp / "cameras.json")
+            except Exception as e:  # noqa: BLE001 — replay sans caméras lisibles : le clip part sans caméra
+                counts["echecs"] += 1
+                log("caméras : échec", "error", match=mid, erreur=f"{type(e).__name__}: {e}"[:500])
+                continue
+            cli.put_object(Bucket=b, Key=dest, Body=(tmp / "cameras.json").read_bytes())
+            counts["faites"] += 1
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    log(f"caméras : {counts['faites']} déposée(s), {counts['deja_la']} déjà là, {counts['sans_replay']} sans "
+        f"replay, {counts['echecs']} échec(s) en {time.time() - t0:.0f} s")
+    return counts
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Worker RLPI")
     sub = ap.add_subparsers(dest="cmd")
@@ -706,6 +745,7 @@ def main() -> None:
     s.add_argument("--all", action="store_true", help="toutes les parties traitées, pas seulement celles à mettre à jour")
     s.add_argument("--here", action="store_true", help="calculer dans ce processus au lieu de mettre en file")
     s.add_argument("--parallel", type=int, default=3, help="avec --here : parties traitées à la fois (défaut 3)")
+    sub.add_parser("backfill-cameras", help="déposer les caméras (vue joueur) des parties traitées avant elles")
     a = ap.parse_args()
     if a.cmd not in (None, "run"):
         os.environ["RLPI_LOG_FORMAT"] = "texte"  # commandes lancées à la main : sortie lisible
@@ -727,6 +767,8 @@ def main() -> None:
         retry(a.ids, a.all)
     elif a.cmd == "rebuild-aggregates":
         rebuild_aggregates(a.all, a.here, max(1, a.parallel))
+    elif a.cmd == "backfill-cameras":
+        backfill_cameras()
     elif a.cmd == "sync":
         n = collector.sync_player(a.player, log) if a.player else collector.sync_all(log)
         log(f"{n} partie(s) mise(s) en file")

@@ -29,7 +29,7 @@ from rlpi.dashboard.metrics import COMPO_COLUMNS, KEYS, TECH_KEYS, metrics, tech
 if TYPE_CHECKING:
     from rlpi.context import DataContext
 
-VERSION = 2  # 2 : image (`i`) des pires et meilleures touches, pour les ralentis (rlpi.clips)
+VERSION = 2  # 2 : indice d'image `i` (et position de la balle sur la courbe) des touches, pour les revoir
 GAME_SOURCE = "partie"  # comme rlpi.game
 TABLES = ("player_match_stats", "touch_values", "goal_xv", "touch_decisions", "placement", "passes", "perf")
 # Colonnes brutes lues par les indicateurs et les traits de style : absentes d'une partie = vides (voir ensure_columns)

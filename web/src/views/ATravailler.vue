@@ -1,12 +1,11 @@
 <script setup lang="ts">
 // À travailler : les touches les plus coûteuses de la période (horloge de jeu, fiches ralenti, suivantes) et le
 // gain moyen par type de touche face aux pros.
-import { computed, ref, watchEffect } from "vue";
-import type { Touch } from "@/api/client";
+import { computed, watchEffect } from "vue";
 import ClockLine from "@/components/ClockLine.vue";
 import GainRow from "@/components/GainRow.vue";
 import MI from "@/components/MI.vue";
-import Ralenti from "@/components/Ralenti.vue";
+import ReplayButton from "@/components/ReplayButton.vue";
 import Scope from "@/components/Scope.vue";
 import Sym from "@/components/Sym.vue";
 import { act1 } from "@/copy";
@@ -25,9 +24,6 @@ const worst = computed(() => V.value?.worst ?? []);
 const top = computed(() => worst.value.slice(0, 3));
 const rest = computed(() => worst.value.slice(3));
 const sx = (v: number | null) => (((v ?? 0) + 1) / 2) * 220;
-// Ralenti d'une touche (« Revoir ») : possible quand l'agrégat de la partie connaît l'image de la touche
-const viewing = ref<Touch | null>(null);
-const canReplay = (t: Touch) => t.match != null && t.i != null;
 
 const gains = computed(() => {
   const A = V.value?.by_action ?? [];
@@ -64,21 +60,21 @@ const gains = computed(() => {
           </svg>
           <div class="pl-small pl-muted">Situation {{ sgn(t.vb) }} → {{ sgn(t.va) }}</div>
           <div class="acts">
-            <button v-if="canReplay(t)" type="button" class="pl-tag open replay" @click="viewing = t">▶ Revoir</button>
+            <ReplayButton :match="t.replay" :i="t.i" :action="t.action" :clock="t.clock" :vb="t.vb" :va="t.va" :date="t.date" />
             <button type="button" class="pl-tag open" @click="openMatch(t.replay)">Ouvrir le match ▸</button>
           </div>
         </div>
       </div>
       <div v-if="rest.length" class="block others">
         <h3 class="pl-tag pl-muted" style="margin-bottom: 4px">Les {{ rest.length }} suivantes</h3>
-        <div v-for="(t, k) in rest" :key="k" class="rrow">
+        <div v-for="(t, k) in rest" :key="k" class="orow">
           <button type="button" class="pl-row pl-small" @click="openMatch(t.replay)">
             <span class="pl-dx" style="font-size: var(--dx-22)">#{{ k + 4 }}</span><span>{{ dS(t.date) }}</span>
             <span class="hide-s">{{ clock(t.clock) }}</span><span>{{ act1(t.action) }}</span>
             <span class="hide-s pl-muted">{{ sgn(t.vb) }} → {{ sgn(t.va) }}</span>
             <span class="pl-bad" style="text-align: right; font-weight: 800">{{ sgn(t.dv) }}</span>
           </button>
-          <button v-if="canReplay(t)" type="button" class="pl-tag replay" :aria-label="`Revoir la touche #${k + 4}`" @click="viewing = t">▶</button>
+          <ReplayButton :match="t.replay" :i="t.i" :action="t.action" :clock="t.clock" :vb="t.vb" :va="t.va" :date="t.date" />
         </div>
       </div>
 
@@ -95,6 +91,5 @@ const gains = computed(() => {
         </div>
       </div>
     </template>
-    <Ralenti v-if="viewing" :t="viewing" @close="viewing = null" />
   </section>
 </template>

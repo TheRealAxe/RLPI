@@ -34,7 +34,7 @@ PROCESSING = "rlpi:processing:"  # + identifiant du worker
 
 # Le schéma de la base est défini par les migrations Flyway (migrations/V<n>__*.sql), jamais par ce code :
 # le serveur et le worker vérifient seulement au démarrage que la base est au moins à cette version.
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 class SchemaError(RuntimeError):

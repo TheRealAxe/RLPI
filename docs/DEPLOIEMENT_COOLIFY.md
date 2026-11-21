@@ -317,6 +317,7 @@ docker exec <worker> python -m rlpi.worker sync [--player Steam:…] # chercher 
 docker exec <worker> python -m rlpi.worker enqueue --ballchasing-id <id> …
 docker exec <worker> python -m rlpi.worker rebuild-aggregates      # agrégats manquants ou périmés remis en file (--all : tous)
 docker exec <worker> python -m rlpi.worker rebuild-aggregates --all --here --parallel 3   # … ou calculés tout de suite ici
+docker exec <worker> python -m rlpi.worker backfill-cameras        # caméras (vue joueur de « ▶ Revoir ») des parties traitées avant elles
 docker exec <worker> python -m rlpi.worker dead | retry …           # lettre morte (§ 6)
 docker exec <web>    python -m rlpi.migrate info                   # état des migrations
 ```

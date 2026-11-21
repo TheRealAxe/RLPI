@@ -65,8 +65,8 @@ def touch_rows(df: pl.DataFrame) -> list[dict]:
     return [
         {
             "replay": r["replay"],
-            "i": r["i"],
             "date": r["date"],
+            "i": r["i"],
             "clock": r["clock"],
             "action": ACTION_FR.get(r["action"], r["action"]),
             "kind": r["kind"],
@@ -107,8 +107,20 @@ def per_game(g: GameInput) -> dict[str, dict]:
             d["details"]["worst"] = touch_rows(me.sort("dv").head(N_WORST))
             d["details"]["best"] = touch_rows(me.sort("dv", descending=True).head(N_BEST))
             d["details"]["curve"] = [
-                {"k": i // 5, "dv": dv, "a": ACTION_FR.get(a, a), "clock": ck, "vb": vb, "va": va}
-                for i, dv, a, ck, vb, va in me.select("i", "dv", "action", "clock", "v_before", "v_after").iter_rows()
+                {
+                    "k": i // 5,
+                    "i": i,
+                    "dv": dv,
+                    "a": ACTION_FR.get(a, a),
+                    "clock": ck,
+                    "vb": vb,
+                    "va": va,
+                    "x": x,
+                    "y": y,
+                }
+                for i, dv, a, ck, vb, va, x, y in me.select(
+                    "i", "dv", "action", "clock", "v_before", "v_after", "ball_x", "ball_y"
+                ).iter_rows()
             ]
 
     slot_of = {p["slot"]: p["id"] for p in g.meta["players"]}
@@ -322,7 +334,7 @@ def section(ref: dict | None, games: Games, player: str, my_replays: list[str], 
             )
 
     def best_rows(key: str, n: int, descending: bool) -> list[dict]:
-        cand = [t | {"match": gm.match_id} for gm, pg in mine_pg for t in pg.details.get(key, [])]
+        cand = [t for _gm, pg in mine_pg for t in pg.details.get(key, [])]
         if not cand:
             return []
         return pl.DataFrame(cand, infer_schema_length=None).sort("dv", descending=descending).head(n).to_dicts()
