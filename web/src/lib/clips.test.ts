@@ -4,7 +4,7 @@ import type { Moi } from "@/api/client";
 import { forgetClips, loadClip } from "./clips";
 import { store } from "./store";
 
-const CLIP = { id: "abc:120", fps: 30, action_frame: 90, ball: [[0, 0, 93]], ball_v: [[0, 0, 0]], cars: [] };
+const CLIP = { id: "abc:120", format: 2, fps: 30, t0: 90, ball: { x: [0], y: [0], z: [93] }, cars: [], cam: null };
 
 function respond(status: number, body: unknown) {
   return vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
@@ -24,7 +24,7 @@ describe("loadClip", () => {
     const f = respond(200, CLIP);
     vi.stubGlobal("fetch", f);
     const c = await loadClip("partie/1", 120);
-    expect(c.action_frame).toBe(90);
+    expect(c.t0).toBe(90);
     expect(f).toHaveBeenCalledOnce();
     expect(String((f.mock.calls[0] as unknown[])[0])).toBe("/api/joueurs/Steam%3A7656/matchs/partie%2F1/clips/120");
   });
@@ -61,5 +61,14 @@ describe("loadClip", () => {
     await expect(loadClip("abc", 5)).rejects.toThrow("Le serveur ne répond pas. Réessaie dans un instant.");
     store.moi = null;
     await expect(loadClip("abc", 6)).rejects.toThrow("Ta session a expiré : reconnecte-toi.");
+  });
+});
+
+describe("toPov", () => {
+  it("garde les réglages caméra relevés et laisse les autres au player (réglages du jeu)", async () => {
+    const { toPov } = await import("./clips");
+    const c = toPov({ ...CLIP, cam: { settings: { fov: 105, distance: null }, ballcam: [1, 0] } } as never);
+    expect(c.cam).toEqual({ settings: { fov: 105 }, ballcam: [1, 0] });
+    expect(toPov(CLIP as never).cam).toBeNull();
   });
 });

@@ -2,13 +2,14 @@
 
 Trois étapes, séparées pour pouvoir être appelées par le worker (Swipe) comme par l'API (clip à la demande) :
 
-- `read_replay(path)` : lecture unique du replay par subtr-actor, à 120 images/s (balle, voitures, boost) ;
+- `read_replay(path)` : lecture unique du replay par subtr-actor, à 120 images/s (balle, voitures, boost,
+  saut / double saut / dodge) ;
 - `locate(track, i10, ball_xy)` : instant exact de la touche à 120 images/s, à partir de son index à 10 images/s et
   de la position (x, y) de la balle notée à ce moment-là ;
 - `cut(track, meta, j, judged_id)` : la carte `SwipeCard` (3 s avant, 1 s après, 30 images/s) lue par le lecteur
   web (`web/src/swipe/player.ts`).
 
-Pour la vue joueur du lecteur : `read_cameras(path)` relève les réglages caméra de chaque joueur (FOV, distance,
+Pour « ta caméra » du player 3D (rlpi.pov) : `read_cameras(path)` relève les réglages caméra de chaque joueur (FOV, distance,
 hauteur, angle, raideur) et ses bascules caméra balle / caméra voiture ; `cut(..., cams=...)` les ajoute au clip.
 Cette lecture est lourde (1,5 à 3 s, environ 250 Mo) : le worker l'écrit une fois par partie (`<replay>.cameras.json`).
 
@@ -66,7 +67,11 @@ def read_replay(path: str | Path, fps: int = SRC_FPS) -> Track:
     import subtr_actor as sa
 
     cols, arr = sa.get_ndarray_with_info_from_replay_filepath(
-        str(path), ["BallRigidBody", "CurrentTime"], ["PlayerRigidBodyBasis", "PlayerBoost"], fps=fps, dtype="f32"
+        str(path),
+        ["BallRigidBody", "CurrentTime"],
+        ["PlayerRigidBodyBasis", "PlayerBoost", "PlayerJump"],
+        fps=fps,
+        dtype="f32",
     )
     h = cols["column_headers"]
     return Track(np.asarray(arr), list(h["global_headers"]), list(h["player_headers"]), fps)

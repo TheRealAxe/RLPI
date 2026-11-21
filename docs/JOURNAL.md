@@ -965,3 +965,20 @@ swipe, découpe `swipe.extract`). Pas de fantôme.
   lecteur du swipe sans vote (`ClipPlayer.vue`), touche marquée sur la barre de temps, ×0,5 par défaut, Échap pour
   fermer ; « environ 30 s la première fois » pendant la préparation.
 - `clips.py` ajouté aux vérifications ruff format et pyright de la CI.
+
+## 2026-11-21 — « Revoir » dans le player 3D de la vue embarquée
+
+Retour de Théo sur les ralentis : le lecteur était celui du swipe (vue de biais), pas la dernière version du player 3D
+(vue embarquée `reports/pov.html`). Porté dans l'application, sans fantôme.
+- `rlpi.pov` : extraction au format du player 3D, reprise de `bestplay.hd_block` (branche archivée) : replay lu à
+  60 i/s, trajectoires lissées (`smooth_track`), 30 i/s, vecteurs avant / haut, boost, saut / double saut / dodge,
+  rôle des voitures (toi, coéquipiers, adversaires), réglages caméra du joueur et état de sa caméra balle
+  (CameraSettingsActor_TA). Essai sur une vraie partie : 10 ralentis en 1,8 s, ~80 Ko chacun, réglages lus
+  (champ 110, distance 270, hauteur 100, angle −3, rigidité 0,7).
+- `rlpi.clips` : ralentis au format 2 ; un ralenti de l'ancien format (vue du swipe) est considéré comme absent et
+  refait au prochain clic.
+- Interface : `web/src/pov/scene.ts` (three.js 0.160, même version que la vue embarquée) et `PovPlayer.vue` :
+  ta caméra / caméra balle / caméra voiture / vue libre, ×0,25 / ×0,5 / ×1, arrêt sur la touche au premier passage,
+  tableau de bord (temps, phase, km/h, boost, saut / dodge, nez). Le lecteur du swipe reste celui du swipe.
+- `package-lock.json` : seules les entrées de three et @types/three sont ajoutées (npm 10 local réécrivait les
+  champs `libc` du fichier).

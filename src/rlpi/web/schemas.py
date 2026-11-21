@@ -12,6 +12,7 @@ sachant pas les écrire.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -621,38 +622,58 @@ class Match(Strict):
 # ------------------------------------------------------------------------------------------------ clips 3D
 
 
+class ClipXyz(Strict):
+    x: list[int] = Field(description="x à chaque image (unités du jeu, vers la gauche comme dans Rocket League)")
+    y: list[int] = Field(description="y à chaque image (vers le but adverse de l'auteur de la touche)")
+    z: list[int] = Field(description="Hauteur à chaque image")
+
+
 class ClipCar(Strict):
-    team: int
-    judged: bool = Field(description="Voiture mise en avant : l'auteur de la touche")
-    pos: list[list[int]] = Field(description="Position (x, y, z) à chaque image, en unités du jeu")
-    vel: list[list[int]] = Field(description="Vitesse (x, y, z) à chaque image")
-    fw: list[list[float]] = Field(description="Vecteur unitaire vers l'avant de la voiture")
-    up: list[list[float]] = Field(description="Vecteur unitaire vers le haut de la voiture")
+    name: str
+    kind: Literal["me", "mate1", "mate2", "opp"] = Field(
+        description="me (auteur de la touche), mate1, mate2 (ses coéquipiers) ou opp (adversaire)"
+    )
+    x: list[int]
+    y: list[int]
+    z: list[int]
+    fwd: tuple[list[float], list[float], list[float]] = Field(
+        description="Vecteur unitaire vers l'avant : [x, y, z], une liste par axe"
+    )
+    up: tuple[list[float], list[float], list[float]] = Field(
+        description="Vecteur unitaire vers le haut : [x, y, z], une liste par axe"
+    )
     boost: list[int] = Field(description="Boost (0 à 100)")
+    jump: list[int] = Field(description="Saut en cours (1) à chaque image")
+    djump: list[int] = Field(description="Double saut en cours (1) à chaque image")
+    dodge: list[int] = Field(description="Dodge en cours (1) à chaque image")
 
 
-class ClipCam(Strict):
-    """Caméra du joueur mis en avant, relevée dans le replay (vue joueur du lecteur)."""
-
+class ClipCamSettings(Strict):
     fov: float | None = Field(default=None, description="Champ de vision horizontal (degrés)")
     distance: float | None = Field(default=None, description="Distance derrière la voiture (unités du jeu)")
     height: float | None = Field(default=None, description="Hauteur au-dessus de la voiture (unités du jeu)")
     angle: float | None = Field(default=None, description="Inclinaison (degrés, négatif : vers le bas)")
     stiffness: float | None = Field(default=None, description="Raideur (0 : caméra souple, 1 : rigide)")
-    known: bool = Field(description="Réglages relevés dans le replay (sinon : réglages par défaut du lecteur)")
-    ball_cam: list[int] = Field(description="Caméra balle (1) ou caméra voiture (0) à chaque image")
+
+
+class ClipCam(Strict):
+    """Caméra de l'auteur de la touche, relevée dans le replay (« ta caméra » du player)."""
+
+    settings: ClipCamSettings = Field(description="Réglages relevés (vides : réglages par défaut du jeu)")
+    ballcam: list[int] = Field(description="Caméra balle (1) ou caméra voiture (0) à chaque image")
 
 
 class Clip(Strict):
-    """Clip 3D d'une touche, au format des cartes du Swipe (lu par web/src/swipe/player.ts)."""
+    """Clip 3D d'une touche, au format du player 3D (lu par web/src/pov/scene.ts). Positions dans le repère de
+    l'équipe de l'auteur de la touche."""
 
     id: str = Field(description="« <partie>:<i> »")
+    format: int = Field(description="Format du clip (2 : player 3D)")
     fps: int = Field(description="Images par seconde (30)")
-    action_frame: int = Field(description="Image de la touche dans le clip")
-    ball: list[list[int]] = Field(description="Position de la balle à chaque image")
-    ball_v: list[list[int]] = Field(description="Vitesse de la balle à chaque image")
+    t0: int = Field(description="Image de la touche dans le clip")
+    ball: ClipXyz
     cars: list[ClipCar]
-    cam: ClipCam | None = Field(default=None, description="Caméra du joueur mis en avant, si relevée")
+    cam: ClipCam | None = Field(default=None, description="Caméra de l'auteur de la touche, si relevée")
 
 
 # ------------------------------------------------------------------------------------------------ modèles

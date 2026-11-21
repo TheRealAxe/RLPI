@@ -711,7 +711,11 @@ def synthetic_replay(monkeypatch):
 
 
 def judged(body: dict) -> list[bool]:
-    return [c["judged"] for c in body["cars"]]
+    return [c["kind"] == "me" for c in body["cars"]]
+
+
+def ball_at(body: dict, k: int) -> list[int]:
+    return [body["ball"][c][k] for c in "xyz"]
 
 
 def test_clip_service_partie_fictive(synthetic_replay):
@@ -721,17 +725,19 @@ def test_clip_service_partie_fictive(synthetic_replay):
     svc = wclips.ClipService(s3=clip_storage(meta, touches), bucket="b")
     body = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, 50, ME)))
     schemas.Clip.model_validate(body)
-    assert body["id"] == f"{CLIP_MATCH}:50" and body["fps"] == 30 and body["action_frame"] == 120
-    assert body["ball"][120] == [6000, 500, 93]  # calage dans le repère du terrain
+    assert body["id"] == f"{CLIP_MATCH}:50" and body["fps"] == 30 and body["t0"] == 120 and body["format"] == 2
+    # balle en (6000, 500) sur le terrain ; le joueur connecté est dans l'équipe 1 : x et y retournés
+    assert ball_at(body, 120) == [-6000, -500, 93]
     assert judged(body) == [k == 4 for k in range(6)]  # deux touches dans l'image : celle du joueur connecté
+    assert [c["kind"] for c in body["cars"]] == ["opp", "opp", "opp", "mate1", "me", "mate2"]
     other = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, 50, "Steam:0")))
-    assert judged(other) == [k == 0 for k in range(6)]
+    assert judged(other) == [k == 0 for k in range(6)] and ball_at(other, 120) == [6000, 500, 93]  # équipe 0
     mate = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, 60, ME)))
     assert judged(mate) == [k == 1 for k in range(6)]  # touche d'un autre : son auteur est mis en avant
     assert svc.replay_reads == 1  # la dernière partie lue reste en mémoire
     cam = body["cam"]  # caméra du joueur connecté : réglages relevés, caméra voiture 0,1 s avant la touche
-    assert cam["fov"] == 105.0 and cam["known"] is True and len(cam["ball_cam"]) == len(body["ball"])
-    assert cam["ball_cam"][116] == 1 and cam["ball_cam"][118] == 0 and cam["ball_cam"][120] == 0
+    assert cam["settings"]["fov"] == 105.0 and len(cam["ballcam"]) == len(body["ball"]["x"])
+    assert cam["ballcam"][116] == 1 and cam["ballcam"][118] == 0 and cam["ballcam"][120] == 0
     assert other["cam"] is None  # pas de caméra relevée pour ce joueur
     for i, status in ((70, 422), (98, 422), (51, 404)):
         with pytest.raises(wclips.ClipError) as e:
@@ -847,19 +853,18 @@ def test_clip_vrai_replay(tmp_path):
     picks = pl.read_parquet(tmp_path / f"{rid}.touches.parquet").filter(
         (pl.col("slot") >= 0) & (pl.col("i") >= 40) & (pl.col("i") < f10.height - 20)
     )
-    touches, world = [], {}
+    touches = []
     for i, s in picks.select("i", "slot").unique("i", keep="first", maintain_order=True).head(8).iter_rows():
         sgn = 1 if by_slot[s]["team"] == 0 else -1  # touch_values : repère de l'équipe du toucheur
         bx, by = f10["ball_x"][i], f10["ball_y"][i]
         touches.append({"i": i, "player_id": by_slot[s]["id"], "ball_x": sgn * bx, "ball_y": sgn * by})
-        world[i] = (bx, by)
     svc = wclips.ClipService(s3=clip_storage(meta, touches, RAW[0].read_bytes()), bucket="b")
     for t in touches:
         body = json.loads(gzip.decompress(svc.clip(CLIP_MATCH, CLIP_KEY, t["i"], ME)))
         schemas.Clip.model_validate(body)
         assert judged(body).count(True) == 1
-        bx, by, _ = body["ball"][body["action_frame"]]
-        assert abs(bx - world[t["i"]][0]) < 60 and abs(by - world[t["i"]][1]) < 60
+        bx, by, _ = ball_at(body, body["t0"])  # repère de l'équipe de l'auteur, comme touch_values
+        assert abs(bx - t["ball_x"]) < 60 and abs(by - t["ball_y"]) < 60
     assert svc.replay_reads == 1
 
 
@@ -896,7 +901,7 @@ def test_clip_api(clip_app):
     assert r.headers["cache-control"] == "private, max-age=86400" and r.headers["etag"].startswith('"clip-')
     body = r.json()
     schemas.Clip.model_validate(body)
-    assert body["id"] == f"{CLIP_MATCH}:50" and body["ball"][body["action_frame"]] == [6000, 500, 93]
+    assert body["id"] == f"{CLIP_MATCH}:50" and ball_at(body, body["t0"]) == [-6000, -500, 93]
     assert c.get(f"{url}/50", headers={"If-None-Match": r.headers["etag"]}).status_code == 304
     assert c.get(f"{url}/60").status_code == 200 and svc.replay_reads == 1  # même partie : replay gardé
     svc.last = None  # partie oubliée : le clip déjà fait vient du cache des clips, sans relire le replay

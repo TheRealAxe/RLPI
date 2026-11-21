@@ -859,3 +859,29 @@ Branche `feature/amelioration-logicielle`, enchaînée sans pause avec G et I (L
   existantes. Les paquets déjà jugés ne sont pas recalculés. Test : `test_resample_objet_immobile_tenu_sans_vitesse_perimee`.
 - `clips.py`, `test_clips.py`, `test_web.py` remis en forme (la CI de Théo vérifie maintenant `clips.py`).
 - pytest 144 réussis (Postgres compris) ; ruff, ruff format, pyright 0 ; vue-tsc 0 ; vitest 31.
+
+## 2026-11-21 — Revoir une action : le player 3D de Théo
+
+- Théo a poussé sur `main` (`bcf07f0`) le player 3D de la vue embarquée (`reports/pov.html`) pour ses ralentis :
+  `web/src/pov/scene.ts` (three.js 0.160) et `PovPlayer.vue` (ta caméra, caméra balle, caméra voiture, vue libre,
+  ×0,25 / ×0,5 / ×1, arrêt sur la touche, tableau de bord km/h, boost, saut / dodge), et `rlpi.pov.extract` côté
+  worker. Décidé avec Luc : **on garde son rendu visuel**, sur le circuit de cette branche (découpe par l'API).
+- Fusion de `main` : `Ralenti.vue` reste retiré, `rlpi.clips`, `test_clips.py` et `test_web.py` gardés de cette
+  branche ; `scene.ts`, `PovPlayer.vue`, three.js, la CI et pyright (`pov.py`) repris tels quels.
+- **`rlpi.pov` réécrit** : le clip au format du player (`pov.clip`) est fait à partir du replay déjà lu par l'API
+  (`clips.read_replay`, qui lit en plus les compteurs saut / double saut / dodge) et de la découpe `clips.cut`, au
+  lieu de relire le replay à 60 i/s et ses acteurs réseau (environ 250 Mo) comme `pov.extract`. Repère de l'équipe
+  de l'auteur, rôles me / mate1 / mate2 / opp (`pov.kinds`, de Théo), caméra depuis `cameras.json`.
+  Comparaison sur un vrai replay (40 touches) avec `pov.extract` : écart médian environ 10 uu (balle et voiture),
+  orientation environ 2°, mêmes sauts. Sur 5 touches, `pov.extract` s'écarte de plusieurs milliers d'uu, avec la
+  balle sous le sol ou loin du point d'engagement : son lissage (`smooth_track`) intègre une vitesse périmée
+  pendant les arrêts de jeu (engagement, après un but), le même défaut que celui corrigé dans `clips.resample`.
+  La découpe de cette branche y suit le replay brut.
+- API : schéma `Clip` au format du player (`format`, `t0`, `ball {x, y, z}`, voitures avec nom, rôle, avant / haut,
+  boost, saut, double saut, dodge ; `cam {settings, ballcam}`) ; `rlpi.web.clips.VERSION` 3 → 4 (ETag).
+- Interface : `ActionReplay.vue` garde sa `<dialog>` (titre, date, chargement, erreur) et affiche `PovPlayer` ;
+  pas de lecture automatique (le player attend « ▶ Lire »). `lib/clips.ts` : `toPov` (réglages caméra non relevés
+  laissés au player). L'ancienne vue joueur de `swipe/player.ts` n'est plus appelée (le Swipe ne s'en sert pas).
+- Tests : `tests/test_pov.py` (rôles, repère, sauts, caméra, vrai replay), tests de `test_web.py` adaptés, vitest
+  `toPov`. pytest 149 réussis (Postgres compris) ; ruff, ruff format, pyright 0 ; vue-tsc 0 ; vitest 32.
+

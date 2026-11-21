@@ -1,7 +1,7 @@
 # Plan : revoir une action en 3D (onglets « Matchs » et « À travailler »)
 
 Objectif : à côté de chaque touche listée (actions qui coûtent d'un match, ralentis et touches suivantes de
-« À travailler »), un bouton **« ▶ Revoir »** ouvre un petit lecteur 3D isométrique : 4 s avant la touche, 2 s
+« À travailler »), un bouton **« ▶ Revoir »** ouvre le player 3D de la vue embarquée (repris de Théo, voir le journal du 2026-11-21) : 4 s avant la touche, 2 s
 après (fenêtre reprise de la version de Théo, voir le journal du 2026-11-21), à 30 images/s, avec la voiture du
 joueur mise en avant.
 
@@ -11,7 +11,7 @@ Décidé le 2026-11-20 avec Luc :
   par défaut) et découpe le clip au clic. Pas de fichier supplémentaire stocké : la lecture complète d'un replay
   à 120 Hz prend environ 0,4 s (mesuré sur un replay de 1,6 Mo, subtr-actor-py 1.5.1).
 - **On garde la porte ouverte à un parseur WebAssembly dans le navigateur** : le lecteur ne consomme qu'un clip au
-  format `SwipeCard`, obtenu par une seule fonction front (`loadClip`) ; chaque touche porte de quoi se retrouver
+  format du player 3D (`PovClip`, au départ `SwipeCard`), obtenu par une seule fonction front (`loadClip`) ; chaque touche porte de quoi se retrouver
   dans le replay (index d'image `i`, position de la balle).
 - On réutilise ce qui existe : le lecteur `web/src/swipe/player.ts` et la découpe `rlpi.swipe.extract`.
 
@@ -32,9 +32,9 @@ Navigateur                         API (FastAPI)                                
                                      │ 3. sinon : télécharge ───────────────────────► replays/<mid>.replay
                                      │            + meta.json, touch_values ────────► games/<mid>/…
                                      │ 4. lit le replay (subtr-actor, 120 Hz), cale la touche,
-                                     │    rééchantillonne à 30 images/s → SwipeCard
-◄──────────── SwipeCard (JSON gzip, ~30–60 Ko) ─┘
-ActionReplay.vue (fenêtre par-dessus la page) → createPlayer(canvas, clip)
+                                     │    rééchantillonne à 30 images/s (clips.cut) → rlpi.pov.clip
+◄──────────── PovClip (JSON gzip, ~30–60 Ko) ───┘
+ActionReplay.vue (fenêtre par-dessus la page) → PovPlayer.vue (three.js, pov/scene.ts)
 ```
 
 ---
@@ -111,6 +111,9 @@ autre joueur, 404 partie d'un autre / replay absent / touche inconnue, 200 avec 
 replay de `data/raw/` (sauté si absent), deuxième appel servi par le cache.
 
 ## Étape 4 — Le lecteur dans l'interface (M)
+
+> Depuis le 2026-11-21, le lecteur est le player 3D de Théo (`web/src/pov/`, three.js) et le clip est au format
+> `PovClip` (`rlpi.pov.clip`, à partir de la même découpe `clips.cut`). Ce qui suit décrit la première version.
 
 - `web/src/lib/clips.ts` : `loadClip(partie, i) → Promise<SwipeCard>`. **Seul point qui sait d'où vient le
   clip** (aujourd'hui l'API ; demain, éventuellement, le `.replay` lu dans le navigateur).

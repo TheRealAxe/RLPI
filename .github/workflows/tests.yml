@@ -72,7 +72,7 @@ jobs:
         run: uv run ruff check --output-format github
 
       - name: ruff (mise en forme du code neuf ou repris)
-        run: uv run ruff format --check tests scripts src/rlpi/migrate.py src/rlpi/context.py src/rlpi/dashboard src/rlpi/web src/rlpi/events.py src/rlpi/swipe_online.py src/rlpi/clips.py src/rlpi/logs.py src/rlpi/backup.py
+        run: uv run ruff format --check tests scripts src/rlpi/migrate.py src/rlpi/context.py src/rlpi/dashboard src/rlpi/web src/rlpi/events.py src/rlpi/swipe_online.py src/rlpi/clips.py src/rlpi/pov.py src/rlpi/logs.py src/rlpi/backup.py
 
       - name: pyright
         run: uv run pyright

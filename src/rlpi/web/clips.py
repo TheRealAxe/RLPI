@@ -1,15 +1,15 @@
 """Clips 3D à la demande (bouton « ▶ Revoir » des onglets Matchs et À travailler).
 
 Le clip d'une touche est découpé au clic dans le replay brut gardé sur Garage (`replays/<partie>.replay`), avec
-`rlpi.clips` (lecture à 120 images/s, calage de la touche, carte `SwipeCard` à 30 images/s) :
+`rlpi.clips` (lecture à 120 images/s, calage de la touche) et `rlpi.pov` (clip au format du player 3D, 30 images/s) :
 
 1. `games/<partie>/frames/partie/<replay>.meta.json` (joueurs) et `games/<partie>/features/touch_values_partie.parquet`
    (touches : index d'image, auteur, position de la balle) sont téléchargés : quelques Ko ;
 2. la touche `i` y est cherchée (inconnue → 404, sans lire le replay) ;
 3. le replay est téléchargé et lu (environ 0,3 s et 20 Mo), puis le clip découpé ;
-4. la caméra du joueur (vue joueur) vient de `<replay>.cameras.json`, écrit par le worker (`python -m rlpi.worker
+4. la caméra du joueur (« ta caméra » du player) vient de `<replay>.cameras.json`, écrit par le worker (`python -m rlpi.worker
    backfill-cameras` pour les parties traitées avant lui). Le serveur ne la lit jamais dans le replay (environ
-   250 Mo) : sans ce fichier, le clip part sans caméra (le lecteur prend alors des réglages par défaut).
+   250 Mo) : sans ce fichier, le clip part sans caméra (le player prend alors les réglages par défaut du jeu).
 
 Protection du serveur web :
 - un clip déjà gardé est servi tout de suite (`aclip`, route asynchrone) ; les autres sont faits dans un thread, au
@@ -37,10 +37,12 @@ from typing import Any
 import anyio
 import polars as pl
 
-from rlpi import clips
+from rlpi import clips, pov
 from rlpi.web.cache import JsonCache, KeyedLocks
 
-VERSION = 3  # version de la découpe : à augmenter quand le contenu d'un clip change (ETag) ; 3 : 4 s avant, 2 s après
+VERSION = (
+    4  # version de la découpe : à augmenter quand le contenu d'un clip change (ETag) ; 3 : 4 s / 2 s ; 4 : player 3D
+)
 BEFORE_S, AFTER_S = 4.0, 2.0  # secondes montrées avant et après la touche (le Swipe garde 3 s / 1 s)
 MAX_READS = 2
 MAX_CLIPS = 300
@@ -203,10 +205,10 @@ class ClipService:
         j = clips.locate(game.track, i, ball_xy)
         if j is None:
             raise NOT_LOCATED
-        card = clips.cut(game.track, game.meta, j, judged, before=BEFORE_S, after=AFTER_S, cams=game.cams or {})
-        if card is None:
+        out = pov.clip(game.track, game.meta, j, judged, BEFORE_S, AFTER_S, cams=game.cams or {})
+        if out is None:
             raise AT_EDGE
-        return {"id": f"{match_id}:{i}", **card}
+        return {"id": f"{match_id}:{i}", **out}
 
     @staticmethod
     def key(match_id: str, version: str, i: int, viewer: str) -> str:

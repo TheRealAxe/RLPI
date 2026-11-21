@@ -344,28 +344,20 @@ export interface components {
         };
         /**
          * Clip
-         * @description Clip 3D d'une touche, au format des cartes du Swipe (lu par web/src/swipe/player.ts).
+         * @description Clip 3D d'une touche, au format du player 3D (lu par web/src/pov/scene.ts). Positions dans le repère de
+         *     l'équipe de l'auteur de la touche.
          */
         Clip: {
-            /**
-             * Action Frame
-             * @description Image de la touche dans le clip
-             */
-            action_frame: number;
-            /**
-             * Ball
-             * @description Position de la balle à chaque image
-             */
-            ball: number[][];
-            /**
-             * Ball V
-             * @description Vitesse de la balle à chaque image
-             */
-            ball_v: number[][];
-            /** @description Caméra du joueur mis en avant, si relevée */
+            ball: components["schemas"]["ClipXyz"];
+            /** @description Caméra de l'auteur de la touche, si relevée */
             cam?: components["schemas"]["ClipCam"] | null;
             /** Cars */
             cars: components["schemas"]["ClipCar"][];
+            /**
+             * Format
+             * @description Format du clip (2 : player 3D)
+             */
+            format: number;
             /**
              * Fps
              * @description Images par seconde (30)
@@ -376,22 +368,32 @@ export interface components {
              * @description « <partie>:<i> »
              */
             id: string;
+            /**
+             * T0
+             * @description Image de la touche dans le clip
+             */
+            t0: number;
         };
         /**
          * ClipCam
-         * @description Caméra du joueur mis en avant, relevée dans le replay (vue joueur du lecteur).
+         * @description Caméra de l'auteur de la touche, relevée dans le replay (« ta caméra » du player).
          */
         ClipCam: {
+            /**
+             * Ballcam
+             * @description Caméra balle (1) ou caméra voiture (0) à chaque image
+             */
+            ballcam: number[];
+            /** @description Réglages relevés (vides : réglages par défaut du jeu) */
+            settings: components["schemas"]["ClipCamSettings"];
+        };
+        /** ClipCamSettings */
+        ClipCamSettings: {
             /**
              * Angle
              * @description Inclinaison (degrés, négatif : vers le bas)
              */
             angle?: number | null;
-            /**
-             * Ball Cam
-             * @description Caméra balle (1) ou caméra voiture (0) à chaque image
-             */
-            ball_cam: number[];
             /**
              * Distance
              * @description Distance derrière la voiture (unités du jeu)
@@ -408,11 +410,6 @@ export interface components {
              */
             height?: number | null;
             /**
-             * Known
-             * @description Réglages relevés dans le replay (sinon : réglages par défaut du lecteur)
-             */
-            known: boolean;
-            /**
              * Stiffness
              * @description Raideur (0 : caméra souple, 1 : rigide)
              */
@@ -426,32 +423,70 @@ export interface components {
              */
             boost: number[];
             /**
-             * Fw
-             * @description Vecteur unitaire vers l'avant de la voiture
+             * Djump
+             * @description Double saut en cours (1) à chaque image
              */
-            fw: number[][];
+            djump: number[];
             /**
-             * Judged
-             * @description Voiture mise en avant : l'auteur de la touche
+             * Dodge
+             * @description Dodge en cours (1) à chaque image
              */
-            judged: boolean;
+            dodge: number[];
             /**
-             * Pos
-             * @description Position (x, y, z) à chaque image, en unités du jeu
+             * Fwd
+             * @description Vecteur unitaire vers l'avant : [x, y, z], une liste par axe
              */
-            pos: number[][];
-            /** Team */
-            team: number;
+            fwd: [
+                number[],
+                number[],
+                number[]
+            ];
+            /**
+             * Jump
+             * @description Saut en cours (1) à chaque image
+             */
+            jump: number[];
+            /**
+             * Kind
+             * @description me (auteur de la touche), mate1, mate2 (ses coéquipiers) ou opp (adversaire)
+             * @enum {string}
+             */
+            kind: "me" | "mate1" | "mate2" | "opp";
+            /** Name */
+            name: string;
             /**
              * Up
-             * @description Vecteur unitaire vers le haut de la voiture
+             * @description Vecteur unitaire vers le haut : [x, y, z], une liste par axe
              */
-            up: number[][];
+            up: [
+                number[],
+                number[],
+                number[]
+            ];
+            /** X */
+            x: number[];
+            /** Y */
+            y: number[];
+            /** Z */
+            z: number[];
+        };
+        /** ClipXyz */
+        ClipXyz: {
             /**
-             * Vel
-             * @description Vitesse (x, y, z) à chaque image
+             * X
+             * @description x à chaque image (unités du jeu, vers la gauche comme dans Rocket League)
              */
-            vel: number[][];
+            x: number[];
+            /**
+             * Y
+             * @description y à chaque image (vers le but adverse de l'auteur de la touche)
+             */
+            y: number[];
+            /**
+             * Z
+             * @description Hauteur à chaque image
+             */
+            z: number[];
         };
         /** Compo */
         Compo: {
