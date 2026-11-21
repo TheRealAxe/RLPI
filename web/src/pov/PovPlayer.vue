@@ -12,7 +12,7 @@ const t = ref(0);
 const playing = ref(false);
 const cam = ref<CamMode>("mine");
 const speed = ref(0.5);
-const failed = ref(false);
+const failed = ref<"webgl" | "clip" | null>(null);
 let P: Pov | null = null;
 
 const CAMS: [CamMode, string][] = [
@@ -44,8 +44,10 @@ onMounted(() => {
   if (!canvas.value) return;
   try {
     P = createPov(canvas.value, props.clip, (h) => (hud.value = h));
-  } catch {
-    failed.value = true; // WebGL indisponible
+  } catch (e) {
+    console.error("Player 3D :", e);
+    // WebGL vraiment absent, ou clip illisible (API pas à jour : ancien format de clip)
+    failed.value = document.createElement("canvas").getContext("webgl2") ? "clip" : "webgl";
     return;
   }
   P.setSpeed(speed.value);
@@ -79,7 +81,8 @@ onBeforeUnmount(() => {
     </div>
     <div class="pov-stage">
       <canvas ref="canvas" role="img" aria-label="Vue 3D de la touche : terrain, balle et les 6 voitures"></canvas>
-      <p v-if="failed" class="pov-fail">La vue 3D n'a pas pu démarrer (WebGL désactivé dans ce navigateur ?).</p>
+      <p v-if="failed === 'webgl'" class="pov-fail">La vue 3D n'a pas pu démarrer (WebGL désactivé dans ce navigateur ?).</p>
+      <p v-else-if="failed" class="pov-fail">Le clip reçu est illisible par la vue 3D (serveur pas à jour ?). Détail dans la console.</p>
       <div v-if="hud" class="pov-hud">
         <div class="box">
           <div class="big">{{ sec(hud.rel) }}</div>
