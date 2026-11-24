@@ -4,6 +4,27 @@
  */
 
 export interface paths {
+    "/api/accueil": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Chiffres publics de la page d'accueil
+         * @description Sans session : parties analysées (statut ok ou partiel) et parties SSL / matchs RLCS de la référence.
+         *     Recalculé au plus toutes les 5 minutes.
+         */
+        get: operations["home_api_accueil_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/joueurs/{id}/matchs/{match}": {
         parameters: {
             query?: never;
@@ -273,6 +294,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Accueil */
+        Accueil: {
+            /**
+             * Matchs Rlcs
+             * @description Matchs RLCS de la référence
+             */
+            matchs_rlcs: number | null;
+            /**
+             * Parties
+             * @description Parties analysées par RLPI, tous joueurs confondus
+             */
+            parties: number;
+            /**
+             * Parties Ssl
+             * @description Parties SSL de la référence (les 6 joueurs Supersonic Legend)
+             */
+            parties_ssl: number | null;
+        };
         /** Actualisation */
         Actualisation: {
             /**
@@ -1712,6 +1751,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    home_api_accueil_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Accueil"];
+                };
+            };
+        };
+    };
     match_api_joueurs__id__matchs__match__get: {
         parameters: {
             query?: never;

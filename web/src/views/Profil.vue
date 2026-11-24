@@ -79,10 +79,11 @@ function resetFilters() {
           </select>
         </label>
         <button type="button" class="linkbtn" aria-haspopup="dialog" @click="openMethod('indice', $event.currentTarget)">Méthode ⓘ</button>
+        <RouterLink class="linkbtn" :to="{ name: 'accueil' }">Accueil</RouterLink>
       </div>
     </nav>
     <header class="pl-header">
-      <div class="pl-cut pl-tag pl-volt">RLPI</div>
+      <RouterLink class="pl-cut pl-tag pl-volt" :to="{ name: 'accueil' }" title="Page d'accueil" style="text-decoration: none">RLPI</RouterLink>
       <div class="pl-cut pl-panel"><h1 class="pl-dx pl-name">{{ contenu?.player ?? store.moi?.nom ?? "Ton profil" }}</h1></div>
       <div class="ctx pl-tag pl-muted">{{ store.status === "ready" && contenu ? ui.ctx : "" }}</div>
     </header>

@@ -42,6 +42,12 @@ class Moi(Strict):
     import_: Import = Field(alias="import")
 
 
+class Accueil(Strict):
+    parties: int = Field(description="Parties analysées par RLPI, tous joueurs confondus")
+    parties_ssl: int | None = Field(description="Parties SSL de la référence (les 6 joueurs Supersonic Legend)")
+    matchs_rlcs: int | None = Field(description="Matchs RLCS de la référence")
+
+
 class Actualisation(Strict):
     lancee: bool = Field(description="False si la recherche précédente date de moins de 5 minutes")
     message: str

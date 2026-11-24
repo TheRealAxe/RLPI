@@ -120,7 +120,7 @@ def test_identifiant_de_requete(client, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize(
-    "path", ["/", "/ma-forme", "/matchs/abc-123?du=2026-01-01", "/indicateurs", "/swipe", "/modeles"]
+    "path", ["/", "/accueil", "/ma-forme", "/matchs/abc-123?du=2026-01-01", "/indicateurs", "/swipe", "/modeles"]
 )
 def test_interface_vue_index_pour_chaque_chemin(client, path):
     r = client.get(path)
@@ -221,6 +221,7 @@ def test_documentation_de_l_api(client):
         "/auth/steam/retour",
         "/auth/deconnexion",
         "/auth/deconnexion-partout",
+        "/api/accueil",
         "/api/moi",
         "/api/moi/actualiser",
         "/api/moi/evenements",
@@ -442,6 +443,24 @@ def test_actualiser(app_db):
     assert c.post("/api/moi/actualiser").json()["lancee"] is True
     assert c.post("/api/moi/actualiser").json()["lancee"] is False  # moins de 5 minutes après
     assert [json.loads(x) for x in r.lrange(store.QUEUE, 0, -1)] == [{"type": "sync", "player": ME}]
+
+
+def test_accueil_public_compte_les_parties_analysees(app_db, monkeypatch):
+    from rlpi.dashboard.storage import reference as storage_reference
+    from rlpi.web.routes import api
+
+    c, _, db = app_db
+    monkeypatch.setattr(api, "_accueil", None)
+    with psycopg.connect(db, autocommit=True) as conn:
+        for i, status in enumerate(("ok", "partiel", "erreur", "en_attente")):
+            conn.execute(
+                "INSERT INTO matches (id, source, status) VALUES (%s, 'fichier', %s)", (f"accueil-{i}", status)
+            )
+    r = c.get("/api/accueil")  # sans session
+    assert r.status_code == 200 and r.json()["parties"] == 2
+    ref = storage_reference()["compare"]  # chiffres de la référence chargée, pas des valeurs écrites en dur
+    assert r.json()["parties_ssl"] == ref["ssl"]["n_ref_matches"] > 0
+    assert r.json()["matchs_rlcs"] == ref["rlcs"]["n_ref_matches"] > 0
 
 
 def test_moi_sans_partie_affiche_l_import(app_db):

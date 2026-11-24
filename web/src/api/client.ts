@@ -3,6 +3,7 @@
 import type { components } from "./schema";
 
 type S = components["schemas"];
+export type Accueil = S["Accueil"];
 export type Moi = S["Moi"];
 export type Profil = S["Profil"];
 export type Tableau = S["Tableau"];

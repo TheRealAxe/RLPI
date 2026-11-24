@@ -1,4 +1,5 @@
-"""API JSON du tableau de bord. Toutes les routes exigent une session ; /api/joueurs/{id}/… seulement pour soi.
+"""API JSON du tableau de bord. Toutes les routes exigent une session (sauf /api/accueil, publique) ;
+/api/joueurs/{id}/… seulement pour soi.
 
 Le contenu vient des agrégats écrits par les workers (rlpi.dashboard.storage) : quelques centaines de ms au plus,
 puis gardé en mémoire (rlpi.web.cache). Les réponses du tableau de bord portent un ETag (version des données du
@@ -19,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from starlette.concurrency import run_in_threadpool
 
-from rlpi import account, events, store
+from rlpi import account, events, logs, store
 from rlpi.web import clips, schemas
 from rlpi.web.cache import JsonCache, etag
 from rlpi.web.deps import CurrentPlayer, OwnPlayer, SameOrigin
@@ -66,6 +67,38 @@ def load(player: str):
     if games is None:
         raise HTTPException(404, NOT_READY)
     return games, storage.reference(), storage.reference_fingerprint()
+
+
+# --------------------------------------------------------------------------------------------- accueil
+
+_accueil: tuple[float, dict] | None = None
+ACCUEIL_TTL_S = 300
+
+
+def reference_matches() -> dict[str, int | None]:
+    """Parties SSL et matchs RLCS de la référence réellement chargée par le serveur (celle du tableau de bord) :
+    elle est recalculée dès que les fichiers de référence changent, donc ces chiffres suivent toujours les données."""
+    from rlpi.dashboard import storage
+
+    try:
+        compare = storage.reference().get("compare") or {}
+    except Exception as e:  # référence absente ou illisible : la page d'accueil n'affiche pas ces chiffres
+        logs.log("référence indisponible pour l'accueil", "warning", erreur=repr(e))
+        compare = {}
+    return {k: (compare.get(k) or {}).get("n_ref_matches") for k in ("ssl", "rlcs")}
+
+
+@router.get("/accueil", response_model=schemas.Accueil, summary="Chiffres publics de la page d'accueil")
+def home() -> dict:
+    """Sans session : parties analysées (statut ok ou partiel) et parties SSL / matchs RLCS de la référence.
+    Recalculé au plus toutes les 5 minutes."""
+    global _accueil
+    if _accueil is None or time.monotonic() - _accueil[0] > ACCUEIL_TTL_S:
+        with store.db() as c:
+            n = store.scalar(c, "SELECT count(*) FROM matches WHERE status IN ('ok', 'partiel')")
+        ref = reference_matches()
+        _accueil = (time.monotonic(), {"parties": int(n or 0), "parties_ssl": ref["ssl"], "matchs_rlcs": ref["rlcs"]})
+    return _accueil[1]
 
 
 # ------------------------------------------------------------------------------------------------ moi
