@@ -77,8 +77,13 @@ def xv(tv: pl.DataFrame, gx: pl.DataFrame | None) -> pl.DataFrame:
     gx = (gx if gx is not None else pl.DataFrame(schema=GOAL_XV_SCHEMA)).sort("replay", "goal_i")
     tv = tv.join_asof(gx, left_on="i", right_on="goal_i", by="replay", strategy="forward", check_sortedness=False)
     v_goal = pl.when(pl.col("team") == 0).then(pl.col("v_team0")).otherwise(-pl.col("v_team0"))
-    return tv.with_columns(pl.when(pl.col("v_after").abs() >= 0.999).then(v_goal - pl.col("v_before"))
-                           .otherwise(pl.col("dv")).alias("dv_xv"))
+    share = pl.col("share").fill_null(1.0) if "share" in tv.columns else pl.lit(1.0)
+    tv = tv.with_columns(pl.when(pl.col("v_after").abs() >= 0.999).then((v_goal - pl.col("v_before")) * share)
+                         .otherwise(pl.col("dv")).alias("dv_xv"))
+    if "going_in_own" in tv.columns:  # audit F2 : balle qui rentrait déjà, la touche n'est pas punie
+        tv = tv.with_columns(pl.when(pl.col("going_in_own").fill_null(False)).then(pl.col("dv_xv").clip(lower_bound=0))
+                             .otherwise(pl.col("dv_xv")).alias("dv_xv"))
+    return tv
 
 
 def player_matches(source: str) -> pl.DataFrame:

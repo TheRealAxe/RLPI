@@ -81,6 +81,8 @@ def extract(path: str, out_dir: str) -> dict:
     cols = {
         "ball_x": a[:, 0], "ball_y": a[:, 1], "ball_z": a[:, 2],
         "ball_vx": a[:, 6], "ball_vy": a[:, 7], "ball_vz": a[:, 8],
+        # rotation de la balle (rad/s ; le replay la stocke ×100), pour la simulation de balle (rlpi.ballsim)
+        "ball_wx": a[:, 9] / 100, "ball_wy": a[:, 10] / 100, "ball_wz": a[:, 11] / 100,
         "seconds_remaining": a[:, gh.index("seconds remaining")],
         "state": a[:, gh.index("game state")].astype(np.int16),
     }
@@ -175,6 +177,42 @@ def fix_goals(source: str) -> None:
     print(f"{changed} replays corrigés dans {out_dir}")
 
 
+def _add_rotation_one(meta_path: str) -> bool:
+    import subtr_actor as sa
+
+    mp = Path(meta_path)
+    m = json.loads(mp.read_text(encoding="utf-8"))
+    fp = mp.with_name(m["replay"] + ".parquet")
+    df = pl.read_parquet(fp)
+    if "ball_wx" in df.columns:
+        return False
+    _, a = sa.get_ndarray_with_info_from_replay_filepath(m["path"], G_ADDERS, P_ADDERS, fps=FPS, dtype="f32")
+    if len(a) != df.height:
+        raise ValueError(f"{m['replay']} : {len(a)} images au lieu de {df.height}")
+    df.with_columns(pl.Series("ball_wx", a[:, 9] / 100), pl.Series("ball_wy", a[:, 10] / 100),
+                    pl.Series("ball_wz", a[:, 11] / 100)).write_parquet(fp)
+    return True
+
+
+def add_rotation(source: str, workers: int = 4) -> None:
+    """Ajoute la rotation de la balle (ball_wx/wy/wz) aux images déjà extraites, sans toucher au reste.
+    Il faut le replay d'origine (chemin `path` du meta.json)."""
+    metas = sorted(str(p) for p in (FRAMES / source).glob("*.meta.json"))
+    done, fails, t0 = 0, [], time.time()
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(_add_rotation_one, p): p for p in metas}
+        for n, fut in enumerate(as_completed(futs), 1):
+            try:
+                done += bool(fut.result())
+            except Exception as e:  # noqa: BLE001
+                fails.append(f"{Path(futs[fut]).name} : {e!r}"[:300])
+            if n % 50 == 0 or n == len(metas):
+                print(f"  {n}/{len(metas)} — {time.time() - t0:.0f}s, échecs {len(fails)}", flush=True)
+    print(f"→ rotation ajoutée à {done} replays ({source}), échecs {len(fails)}")
+    for f in fails[:10]:
+        print("   ", f)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True)
@@ -182,9 +220,13 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--fix-goals", action="store_true", help="recalculer buts et phases sans re-parser")
+    ap.add_argument("--add-rotation", action="store_true", help="ajouter la rotation de la balle aux images extraites")
     a = ap.parse_args()
     if a.fix_goals:
         fix_goals(a.source)
+        return
+    if a.add_rotation:
+        add_rotation(a.source, a.workers)
         return
     roots = [Path(d) for d in a.dir] if a.dir else [RAW / a.source]
     files = sorted((f for r in roots for f in r.rglob("*.replay")), key=lambda p: p.stat().st_mtime, reverse=True)

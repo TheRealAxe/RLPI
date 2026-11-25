@@ -38,6 +38,11 @@ Commandes (dans le conteneur du worker, ou via `docker exec <conteneur> …`) :
     python -m rlpi.worker rebuild-aggregates [--all]  # agrégats manquants (ou tous) remis en file
     python -m rlpi.worker rebuild-aggregates --here [--parallel 3]   # … ou calculés tout de suite ici,
                                                       # 3 parties à la fois (téléchargements Garage en parallèle)
+    python -m rlpi.worker reanalyze [--max-queue 4] [--limit N] [--dry-run]
+                                                      # réanalyse les parties d'une version d'analyse plus
+                                                      # ancienne (rlpi.game.ANALYSIS_VERSION) depuis leur replay
+                                                      # gardé, sans annonce aux joueurs, en gardant la file courte
+                                                      # pour que les nouvelles parties passent presque tout de suite
     python -m rlpi.worker backfill-cameras            # cameras.json (vue joueur de « ▶ Revoir ») des parties
                                                       # traitées avant lui, une à la fois, processus séparé
 
@@ -293,7 +298,8 @@ class Worker:
             log("lettre morte : écriture impossible", "error", erreur=f"{type(e).__name__}: {e}"[:300])
         log("lettre morte", "error", type=kind, match=ref, essais=attempts, erreur=error[:300])
 
-    def process_match(self, raw: str, mid: str) -> None:
+    def process_match(self, raw: str, mid: str, quiet: bool = False) -> None:
+        """quiet : réanalyse d'une partie déjà connue (rlpi.worker reanalyze), pas d'annonce « nouveau match »."""
         from rlpi import game
 
         row = self.conn.execute("UPDATE matches SET status = 'en_cours', attempts = attempts + 1, worker = %s, "
@@ -340,7 +346,7 @@ class Worker:
                                       "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
                                       (mid, p["id"], p.get("name"), p.get("team")))
                 t = time.time()
-                self.aggregate_dir(mid, out)
+                self.aggregate_dir(mid, out, announce=not quiet)
                 t_agregats = round(time.time() - t, 2)
             if status != "erreur" and not self.keep_replays:
                 self.s3.delete_object(Bucket=self.bucket, Key=key)
@@ -361,7 +367,7 @@ class Worker:
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def aggregate_dir(self, mid: str, out: Path) -> None:
+    def aggregate_dir(self, mid: str, out: Path, announce: bool = True) -> None:
         """Agrégats du tableau de bord d'une partie qui vient d'être traitée (dossier local, rien à télécharger).
         Un échec n'annule pas la partie : elle sera reprise au prochain rattrapage."""
         from rlpi.dashboard import aggregate, storage
@@ -377,7 +383,8 @@ class Worker:
             self.bury("aggregate", mid, json.dumps({"type": "aggregate", "match": mid}), msg,
                       version=aggregate.VERSION)
             return
-        self.announce(mid, agg)
+        if announce:
+            self.announce(mid, agg)
 
     def announce(self, mid: str, agg: dict) -> None:
         """« Nouveau match traité » pour les joueurs inscrits de la partie (voir rlpi.events). Un échec ne change
@@ -467,7 +474,7 @@ class Worker:
             except Exception as e:  # noqa: BLE001
                 log("sync : échec", "error", joueur=task["player"], erreur=f"{type(e).__name__}: {e}"[:500])
         elif task.get("type") == "match":
-            self.process_match(raw, task["match"])
+            self.process_match(raw, task["match"], quiet=bool(task.get("quiet")))
         elif task.get("type") == "aggregate":
             self.process_aggregate(task["match"], raw)
         elif task.get("type") == "swipe":
@@ -670,6 +677,42 @@ def rebuild_aggregates(everything: bool, here: bool, parallel: int = 3) -> None:
     log(f"reconstruction : {ok}/{len(ids)} partie(s) en {time.time() - t0:.1f} s ({parallel} à la fois)")
 
 
+def reanalyze(max_queue: int = 4, limit: int = 0, dry_run: bool = False, pause: float = 5.0) -> int:
+    """Remet en file, peu à peu, les parties analysées avec une version plus ancienne que ANALYSIS_VERSION.
+
+    Les plus récentes d'abord. La file n'a jamais plus de `max_queue` tâches en attente : une partie qui vient
+    d'être jouée passe derrière au plus quelques réanalyses. Sans risque à interrompre et relancer (on ne reprend
+    que les parties encore en retard). Il faut le replay dans le stockage (RLPI_KEEP_REPLAYS=1, le défaut)."""
+    from rlpi.game import ANALYSIS_VERSION
+
+    conn, r = store.connect(), store.redis_client()
+    rows = conn.execute(
+        "SELECT id FROM matches WHERE status IN ('ok', 'partiel') AND replay_key IS NOT NULL "
+        "AND COALESCE((result->>'analysis_version')::int, 1) < %s ORDER BY played_at DESC NULLS LAST, id",
+        (ANALYSIS_VERSION,)).fetchall()
+    ids = [x[0] for x in rows][: limit or None]
+    no_replay = conn.execute(
+        "SELECT count(*) FROM matches WHERE status IN ('ok', 'partiel') AND replay_key IS NULL").fetchone()
+    log(f"réanalyse (version {ANALYSIS_VERSION}) : {len(ids)} partie(s) à refaire"
+        + (f", {no_replay[0]} sans replay gardé (non réanalysables)" if no_replay and no_replay[0] else ""))
+    if dry_run or not ids:
+        return len(ids)
+    t0, k = time.time(), 0
+    while k < len(ids):
+        waiting = int(cast("int", r.llen(QUEUE)))
+        while waiting < max_queue and k < len(ids):
+            r.lpush(QUEUE, json.dumps({"type": "match", "match": ids[k], "quiet": True}))
+            k += 1
+            waiting += 1
+        if k % 20 == 0 or k == len(ids):
+            el = time.time() - t0
+            log(f"réanalyse : {k}/{len(ids)} en file ({el / 60:.0f} min"
+                + (f", reste ≈ {el / k * (len(ids) - k) / 60:.0f} min)" if k else ")"))
+        time.sleep(pause)
+    log(f"réanalyse : les {len(ids)} parties sont en file ; les dernières se terminent dans quelques minutes")
+    return len(ids)
+
+
 def backfill_cameras() -> dict[str, int]:
     """Dépose le `<replay>.cameras.json` des parties traitées avant lui (vue joueur du bouton « ▶ Revoir »).
 
@@ -745,6 +788,10 @@ def main() -> None:
     s.add_argument("--here", action="store_true", help="calculer dans ce processus au lieu de mettre en file")
     s.add_argument("--parallel", type=int, default=3, help="avec --here : parties traitées à la fois (défaut 3)")
     sub.add_parser("backfill-cameras", help="déposer les caméras (vue joueur) des parties traitées avant elles")
+    s = sub.add_parser("reanalyze", help="réanalyser les parties d'une version d'analyse plus ancienne")
+    s.add_argument("--max-queue", type=int, default=4, help="tâches en attente au plus dans la file (défaut 4)")
+    s.add_argument("--limit", type=int, default=0, help="au plus N parties (les plus récentes)")
+    s.add_argument("--dry-run", action="store_true", help="compter seulement")
     a = ap.parse_args()
     if a.cmd not in (None, "run"):
         os.environ["RLPI_LOG_FORMAT"] = "texte"  # commandes lancées à la main : sortie lisible
@@ -768,6 +815,8 @@ def main() -> None:
         rebuild_aggregates(a.all, a.here, max(1, a.parallel))
     elif a.cmd == "backfill-cameras":
         backfill_cameras()
+    elif a.cmd == "reanalyze":
+        reanalyze(max(1, a.max_queue), a.limit, a.dry_run)
     elif a.cmd == "sync":
         n = collector.sync_player(a.player, log) if a.player else collector.sync_all(log)
         log(f"{n} partie(s) mise(s) en file")

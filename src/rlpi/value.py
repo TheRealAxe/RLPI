@@ -6,6 +6,11 @@ Idée : P(l'équipe T marque dans les H secondes | situation vue par T). Un seul
 Valeur d'une touche du joueur j (équipe T) à l'image i :
     ΔV = V_T(juste avant la touche suivante, au plus +1 s) − V_T(0,2 s avant la touche)
     (si un but tombe entre les deux : V = +1 ou −1)
+Corrections de l'audit du 24/11/2026 (docs/AUDIT_IMPACT_2026-11-24.md) :
+    F3  une seule touche par joueur et par image ; crédit partagé entre coéquipiers sur la même image (`share`) ;
+    F1  un but de l'équipe du toucheur sans autre touche dans les 4 s est rattaché à la touche (tirs de loin) ;
+    F2  si la balle, laissée libre, entrait déjà dans le but du toucheur (rlpi.ballsim), ΔV ne peut pas être
+        négatif (`going_in_own`) : on ne punit pas une tentative d'arrêt sur un but déjà fait.
 
 Usage :
     python -m rlpi.value train [--horizon 10]     → data/models/value_h10.txt + rapport
@@ -34,6 +39,34 @@ def _player_block(f: pl.DataFrame, k: int, s: float) -> dict[str, np.ndarray]:
             "yaw": g("rz") + (0.0 if s > 0 else np.pi)}
 
 
+_TRAJ_CACHE: dict[tuple, dict[str, np.ndarray]] = {}
+
+
+def trajectory(f: pl.DataFrame) -> dict[str, np.ndarray]:
+    """Variables de trajectoire simulées (rlpi.ballsim.goal_lines, 4 s) pour chaque image, dans le repère du
+    terrain. Mises en cache : `features` est appelée pour les deux équipes et par plusieurs étapes."""
+    from rlpi import ballsim
+
+    bx, by = f["ball_x"].to_numpy(), f["ball_y"].to_numpy()
+    key = (f.height, float(bx[: 50].sum()), float(by[-50:].sum()), float(np.nansum(bx)))
+    if key not in _TRAJ_CACHE:
+        if len(_TRAJ_CACHE) > 8:
+            _TRAJ_CACHE.clear()
+        g = lambda c: f[c].to_numpy().astype(np.float64)  # noqa: E731
+        x = np.column_stack([g("ball_x"), g("ball_y"), g("ball_z")])
+        v = np.column_stack([g("ball_vx"), g("ball_vy"), g("ball_vz")])
+        w = np.column_stack([g("ball_wx"), g("ball_wy"), g("ball_wz")]) if "ball_wx" in f.columns else None
+        ok = np.isfinite(x).all(1) & np.isfinite(v).all(1)
+        out = {k: np.full(f.height, d, np.float32) for k, d in
+               (("t_pos", 10.0), ("t_neg", 10.0), ("in_pos", 0.0), ("in_neg", 0.0), ("x_pos", 4096.0), ("x_neg", 4096.0))}
+        if ok.any():
+            r = ballsim.goal_lines(x[ok], v[ok], None if w is None else w[ok], 4.0)
+            for k in out:
+                out[k][ok] = r[k]
+        _TRAJ_CACHE[key] = out
+    return _TRAJ_CACHE[key]
+
+
 def features(f: pl.DataFrame, team: int, score_diff: np.ndarray) -> np.ndarray:
     """Matrice (n_images, n_variables) du point de vue de `team` (attaque vers y > 0)."""
     s = 1.0 if team == 0 else -1.0
@@ -41,13 +74,10 @@ def features(f: pl.DataFrame, team: int, score_diff: np.ndarray) -> np.ndarray:
     bvx, bvy, bvz = s * f["ball_vx"].to_numpy(), s * f["ball_vy"].to_numpy(), f["ball_vz"].to_numpy()
     cols = [bx, by, bz, bvx, bvy, bvz, np.sqrt(bvx**2 + bvy**2 + bvz**2),
             np.hypot(bx, GOAL_Y - by), np.hypot(bx, GOAL_Y + by)]
-    # Trajectoire de la balle vers chaque but (ligne droite, sans gravité ni rebond)
-    for direction, line in ((1, GOAL_Y), (-1, -GOAL_Y)):
-        v = direction * bvy
-        t = np.where(v > 50, (line - by) * direction / np.maximum(v, 50), 10.0)
-        t = np.clip(t, 0, 10)
-        x_at = bx + bvx * t
-        cols += [t, ((t < 10) & (np.abs(x_at) < 893)).astype(np.float32), np.clip(np.abs(x_at), 0, 4096)]
+    # Trajectoire de la balle vers chaque but : simulée avec gravité et rebonds (rlpi.ballsim, audit L1)
+    tr = trajectory(f)
+    for c in (("pos", "neg") if team == 0 else ("neg", "pos")):  # but adverse puis but de l'équipe
+        cols += [tr[f"t_{c}"], tr[f"in_{c}"], tr[f"x_{c}"]]
     for side, slots in (("own", [0, 1, 2] if team == 0 else [3, 4, 5]),
                         ("opp", [3, 4, 5] if team == 0 else [0, 1, 2])):
         blocks = [_player_block(f, k, s) for k in slots]
@@ -190,6 +220,59 @@ def value_series(booster, m: dict, f: pl.DataFrame, horizon: int) -> dict[int, n
     return v
 
 
+# Priorité des actions quand un joueur a plusieurs touches sur la même image (contrôle puis tir à moins de 0,1 s)
+ACTION_RANK = {"shot": 0, "save": 1, "pass": 2, "boom": 3, "clear": 4}  # action absente (contrôle…) : en dernier
+GOAL_LINK_S = 4.0  # un but sans autre touche dans les 4 s suivant une touche lui est rattaché
+
+
+def merge_same_frame(t: pl.DataFrame) -> pl.DataFrame:
+    """Une seule ligne par joueur et par image (audit F3) : les événements de subtr-actor à moins de 0,1 s
+    tombent sur la même image à 10 i/s et seraient valorisés deux fois avec la même fenêtre. On garde l'action
+    la plus forte et la somme des changements de vitesse de la balle. Colonne `share` : 1 / nombre de
+    coéquipiers qui touchent sur la même image (le crédit est partagé entre eux)."""
+    if t.is_empty():
+        return t.with_columns(pl.lit(1.0).alias("share"))
+    rank = pl.col("action").replace_strict(ACTION_RANK, default=9, return_dtype=pl.Int64)
+    t = (t.with_columns(rank.alias("_rank"))
+         .sort("i", "slot", "_rank")
+         .group_by("i", "slot", maintain_order=True)
+         .agg(pl.all().exclude("ball_speed_change").first(), pl.col("ball_speed_change").sum())
+         .drop("_rank"))
+    n_mates = pl.col("slot").filter(pl.col("slot") >= 0).n_unique().over("i", "team")
+    return t.with_columns((1.0 / pl.max_horizontal(n_mates, pl.lit(1))).alias("share")).sort("i", "slot")
+
+
+def touch_window(i: int, nxt: int, n: int, goals: list[dict], team: int) -> int:
+    """Image où l'on mesure la conséquence d'une touche : juste avant la touche suivante, au plus 1 s après.
+    Si le prochain événement est un but de l'équipe du toucheur (aucune touche entre les deux, au plus GOAL_LINK_S),
+    on va jusqu'au but (audit F1) : sans ça, un tir de loin qui met plus d'1 s à rentrer n'est crédité à personne.
+    Pas pour un but encaissé : la dernière touche d'un défenseur sur un ballon qui rentrait déjà serait punie du
+    but entier (voir audit F2 et ballsim)."""
+    after = int(min(i + FPS, max(nxt - 1, i + 1), n - 1))
+    g = next((g for g in goals if g["i"] > i), None)
+    if g is not None and g["team"] == team and g["i"] <= nxt and g["i"] - i <= GOAL_LINK_S * FPS and g["i"] > after:
+        after = min(int(g["i"]), n - 1)
+    return after
+
+
+GOING_IN_S = 3.0  # horizon de la simulation « sans la touche »
+
+
+def going_in(f: pl.DataFrame, starts: np.ndarray) -> np.ndarray:
+    """Pour chaque image de départ : but où la balle libre serait entrée dans les GOING_IN_S secondes
+    (0 : but en y > 0, marqué par l'équipe 0 ; 1 : but en y < 0 ; −1 : aucun). Voir rlpi.ballsim (validé sur
+    replays : 96 % des buts vus, 0,4 % de faux buts). Rotation de la balle prise en compte si les images l'ont."""
+    from rlpi import ballsim
+
+    if len(starts) == 0:
+        return np.zeros(0, np.int8)
+    col = lambda c: f[c].to_numpy()[starts]  # noqa: E731
+    x = np.column_stack([col("ball_x"), col("ball_y"), col("ball_z")])
+    v = np.column_stack([col("ball_vx"), col("ball_vy"), col("ball_vz")])
+    w = np.column_stack([col("ball_wx"), col("ball_wy"), col("ball_wz")]) if "ball_wx" in f.columns else None
+    return ballsim.simulate(x, v, w, GOING_IN_S)[0]
+
+
 def touches(source: str, horizon: int) -> None:
     import lightgbm as lgb
 
@@ -197,29 +280,41 @@ def touches(source: str, horizon: int) -> None:
     rows, curves = [], []
     for mp in sorted((FRAMES / source).glob("*.meta.json")):
         m, f = load_replay(mp)
-        t = pl.read_parquet(mp.with_name(m["replay"] + ".touches.parquet")).sort("i")
+        t = merge_same_frame(pl.read_parquet(mp.with_name(m["replay"] + ".touches.parquet")).sort("i"))
         v = value_series(booster, m, f, horizon)
         phase = f["phase"].to_numpy()
         n = f.height
         ti = t["i"].to_numpy()
+        goals = sorted(m["goals"], key=lambda g: g["i"])
         players = {p["slot"]: p for p in m["players"]}
+        # Audit F2 : la balle, laissée libre juste avant la touche, entrait-elle dans le but du toucheur ?
+        touch_frames = set(ti.tolist())
+        cand = np.array([i - 1 for i in ti if 1 <= i < n and (i - 1) not in touch_frames], dtype=np.int64)
+        free_goal = dict(zip((cand + 1).tolist(), going_in(f, cand).tolist()))
         for j, r in enumerate(t.iter_rows(named=True)):
             i, slot, team = r["i"], r["slot"], r["team"]
             if slot < 0 or i < 2 or i >= n - 1 or phase[i - 2] != 1:
                 continue
             nxt = next((ti[k] for k in range(j + 1, len(ti)) if ti[k] > i), n - 1)
-            after = int(min(i + FPS, max(nxt - 1, i + 1), n - 1))
+            after = touch_window(i, int(nxt), n, goals, team)
             before = i - 2
+            sh = r["share"]
+            # balle qui rentrait dans son propre but sans la touche : la touche n'est pas responsable du but
+            g_free = free_goal.get(i, -1)
+            in_own = g_free == 1 - team
+            clip = (lambda d: max(d, 0.0)) if in_own else (lambda d: d)
             rows.append({
                 "replay": m["replay"], "date": m["date"], "i": i, "t_s": round(i / FPS, 1),
                 "clock": float(f["seconds_remaining"][i]), "match_type": m.get("match_type"),
                 "player_id": players[slot]["id"], "player_name": players[slot]["name"], "team": team,
                 "action": r["action"], "kind": r["kind"], "height": r["height"], "role": r["role"],
                 "v_before": float(v[team][before]), "v_after": float(v[team][after]),
-                "dv": float(v[team][after] - v[team][before]),
+                "dv": clip(sh * float(v[team][after] - v[team][before])),
                 # conséquences à 2 s et 3 s, quelle que soit la touche suivante
-                "dv_2s": float(v[team][min(i + 2 * FPS, n - 1)] - v[team][before]),
-                "dv_3s": float(v[team][min(i + 3 * FPS, n - 1)] - v[team][before]),
+                "dv_2s": clip(sh * float(v[team][min(i + 2 * FPS, n - 1)] - v[team][before])),
+                "dv_3s": clip(sh * float(v[team][min(i + 3 * FPS, n - 1)] - v[team][before])),
+                "share": sh, "after_i": after,
+                "going_in_own": in_own, "going_in_opp": g_free == team,
                 "ball_x": float(f["ball_x"][i]) * (1 if team == 0 else -1),
                 "ball_y": float(f["ball_y"][i]) * (1 if team == 0 else -1),
             })

@@ -982,3 +982,42 @@ Retour de Théo sur les ralentis : le lecteur était celui du swipe (vue de biai
   tableau de bord (temps, phase, km/h, boost, saut / dodge, nez). Le lecteur du swipe reste celui du swipe.
 - `package-lock.json` : seules les entrées de three et @types/three sont ajoutées (npm 10 local réécrivait les
   champs `libc` du fichier).
+
+## 2026-11-24 — Audit du calcul de l'impact
+
+Demande de Théo après deux défauts vus sur ses parties (but de loin crédité +0,01, arrêts sur des ballons qui
+rentraient comptés comme buts contre son camp). 43 parties ré-analysées en local avec `rlpi.game run` : notes
+identiques à l'application. Rapport : `docs/AUDIT_IMPACT_2026-11-24.md`, scripts : `notebooks/audit_impact/`.
+- F1 : 22 % des buts marqués plus d'1 s après le tir ne sont crédités à personne (10,8 de valeur manquante).
+- F2 : 42 touches défensives sur des ballons qui rentraient déjà, punies pour −7,1.
+- F3 : 86 touches comptées deux fois (même joueur, même image après l'arrondi à 10 i/s).
+- F4 : environ 24 touches non détectées par subtr-actor.
+- Avec F1 à F3, 16 notes de match sur 258 changent de plus de 15 points. Rien n'est encore corrigé dans le code.
+
+## 2026-11-25 — Corrections de l'audit de l'impact et ré-entraînement
+
+Go de Théo pour F3, F1, la référence SSL, F2 avec une vraie prédiction de balle et le ré-entraînement avec une
+trajectoire qui tient compte de la gravité. Détail et chiffres : `docs/AUDIT_IMPACT_2026-11-24.md`, section
+« Corrections appliquées ».
+- `rlpi.ballsim` (nouveau) : simulateur de balle vectorisé, validé sur 563 trajets réels (48 uu d'erreur médiane à
+  3 s). `frames.extract` garde la rotation de la balle (`ball_wx/wy/wz`) ; `python -m rlpi.frames --add-rotation`
+  l'ajoute aux frames existantes (~1 min pour tout le local).
+- `rlpi.value` : F3 (`merge_same_frame`, `share`), F1 (`touch_window`), F2 (`going_in_own`/`going_in_opp`),
+  L1 (`trajectory`, variables de trajectoire simulées). `perf.xv` applique le partage et F2.
+- `rlpi.game.ANALYSIS_VERSION` = 2 (dans `result.json`). Nouvelle commande `python -m rlpi.worker reanalyze
+  [--max-queue 4] [--limit N] [--dry-run]` : remet en file, peu à peu et sans annonce, les parties ok/partielles
+  d'une version plus ancienne dont le replay est conservé dans Garage.
+- Ré-entraînement local : valeur 800 s, revalorisation SSL / RLCS / perso ~39 min, décisions 15 min, référence
+  quelques secondes ; **68 min** en tout. AUC 0,884 → 0,885 ; RLCS équipe gagnante 79,8 %.
+- Les 6 fichiers de `models/` sont remplacés (`placement_x/y` inchangés). Sauvegarde des anciens modèles et
+  features : `data/sauvegarde_2026-11-25/`. `data/models_etapeA` (F1–F3 seuls) et `data/models_etapeB` gardés pour
+  comparaison.
+- Tests : `tests/test_audit_impact.py` (simulateur, F1, F2, F3). `pyright` et `httpx2` absents du `.venv` local :
+  `test_web.py` et pyright non lancés ici, la CI les lancera.
+- Mise en production, dans l'ordre :
+  1. commit + push (code et `models/`) → images reconstruites ;
+  2. volume `rlpi-data` : remplacer `features/touch_values_rlcs.parquet`, `touch_decisions_rlcs.parquet` et
+     `models/*_report.json` (`value_h5`, `q_touch`, `perf`) par les nouveaux, sinon la partie fixe du tableau de
+     bord garde les anciennes distributions ;
+  3. `python -m rlpi.worker reanalyze --dry-run` (nombre de parties), puis sans `--dry-run`. ~15–20 s par partie
+     et par worker ; la partie passe brièvement « en cours ».

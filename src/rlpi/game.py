@@ -34,6 +34,10 @@ from pathlib import Path
 
 GAME_SOURCE = "partie"  # nom de la source à l'intérieur d'un dossier de partie
 HORIZON = 5             # horizon du modèle de valeur, comme dans l'application
+# Version de l'analyse (code + modèles) : à augmenter quand le résultat d'une partie change (nouveaux modèles,
+# correction d'un calcul). `python -m rlpi.worker reanalyze` relance les parties analysées avec une version plus
+# ancienne. 2 : corrections de l'audit de l'impact (F1, F2, F3) et trajectoire simulée de la balle (25/11/2026).
+ANALYSIS_VERSION = 2
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -96,7 +100,8 @@ def _steps(replay: str) -> None:
 
     assert SOURCE == GAME_SOURCE, "lancer via rlpi.game run"
     FEATURES.mkdir(parents=True, exist_ok=True)
-    res = {"replay": Path(replay).stem, "file": Path(replay).name, "status": "ok", "steps": {}, "errors": {}}
+    res = {"replay": Path(replay).stem, "file": Path(replay).name, "status": "ok", "steps": {}, "errors": {},
+           "analysis_version": ANALYSIS_VERSION}
 
     def step(name, fn):
         t = time.time()
